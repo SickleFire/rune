@@ -3,8 +3,10 @@ use serde::{Deserialize, Serialize};
 use std::eprintln;
 use std::path::Path;
 use std::path::PathBuf;
+use futures_util::StreamExt;
 use tokio::io;
 use tokio::io::AsyncWriteExt;
+use tokio::task;
 #[derive(Serialize)]
 pub struct GeminiRequest {
     pub contents: Vec<GeminiContent>,
@@ -85,6 +87,13 @@ impl Agent {
     }
 
     async fn execute_tool(&self, call: &FunctionCall) -> String {
+        if self.is_destructive_tool(call) {
+            if !confirm_execution(call).await {
+                println!("\n[Execution cancelled by user for: {}]", call.name);
+                return "Tool execution rejected by user.".to_string();
+            }
+        }
+
         match call.name.as_str() {
             "list_files" => {
                 let path = call.args["path"].as_str().unwrap_or(".");
@@ -119,6 +128,11 @@ impl Agent {
         }
     }
 
+    fn is_destructive_tool(&self, call: &FunctionCall) -> bool {
+        let is_destructive = matches!(call.name.as_str(), "write_file" | "execute_commands");
+        is_destructive
+    }
+
     pub async fn run(&mut self, prompt: &str) {
         self.history.push(GeminiContent {
             role: Some("user".to_string()),
@@ -131,16 +145,16 @@ impl Agent {
         });
 
         let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={}",
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:streamGenerateContent?alt=sse&key={}",
             self.api_key
         );
 
         loop {
-            let request = GeminiRequest{
+            let request = GeminiRequest {
                 contents: self.history.clone(),
-                tools: Some(self.tools.clone())
+                tools: Some(self.tools.clone()),
             };
-            
+
             let response = match self.client.post(&url).json(&request).send().await {
                 Ok(res) => res,
                 Err(e) => {
@@ -149,68 +163,90 @@ impl Agent {
                 }
             };
 
-            let status = response.status();
-
-            let body_text = match response.text().await {
-                Ok(t) => t,
-                Err(e) => {
-                    eprintln!("Failed to read response body: {e}");
-                    break;
-                }
-            };
-
-            if !status.is_success() {
-                eprintln!("Gemini API error ({status}): {body_text}");
+            if !response.status().is_success() {
+                let status = response.status();
+                let err_text = response.text().await.unwrap_or_default();
+                eprintln!("API Error ({status}): {err_text}");
                 break;
             }
 
-            let gemini_response: GeminiResponse = match serde_json::from_str(&body_text) {
-                Ok(res) => res,
-                Err(e) => {
-                    eprintln!("Failed to parse Gemini response: {e}\nRaw body: {body_text}");
-                    break;
-                }
-            };
+            let mut stream = response.bytes_stream();
+            let mut accumulated_text = String::new();
+            let mut tool_calls: Vec<(FunctionCall, Option<String>)> = Vec::new();
+            let mut buffer = String::new();
 
-            // Extract candidate content
-            let candidate_content = match gemini_response
-                .candidates
-                .and_then(|c| c.into_iter().next())
-            {
-                Some(candidate) => candidate.content,
-                None => {
-                    eprintln!("No candidates returned from Gemini.");
-                    break;
-                }
-            };
+            while let Some(chunk_result) = stream.next().await {
+                let bytes = match chunk_result {
+                    Ok(b) => b,
+                    Err(e) => {
+                        eprintln!("\n[Stream error: {e}]");
+                        break;
+                    }
+                };
 
-            // Record model's turn in history
-            self.history.push(GeminiContent {
-                role: Some("model".to_string()),
-                parts: candidate_content.parts.clone(),
-            });
+                let text = String::from_utf8_lossy(&bytes);
+                buffer.push_str(&text);
 
-            let mut tool_calls = Vec::new();
+                while let Some(line_end) = buffer.find('\n') {
+                    let line = buffer[..line_end].trim().to_string();
+                    buffer.drain(..=line_end);
 
-            for part in &candidate_content.parts {
-                if let Some(text) = &part.text {
-                    print!("{text}");
-                    let _ = io::stdout().flush();
-                }
-                if let Some(call) = &part.function_call {
-                    tool_calls.push(call.clone());
+                    if line.starts_with("data: ") {
+                        let json_str = &line["data: ".len()..];
+
+                        if let Ok(parsed) = serde_json::from_str::<GeminiResponse>(json_str) {
+                            if let Some(candidate) = parsed.candidates.and_then(|c| c.into_iter().next()) {
+                                for part in candidate.content.parts {
+                                    if let Some(t) = &part.text {
+                                        print!("{t}");
+                                        let _ = io::stdout().flush();
+                                        accumulated_text.push_str(t);
+                                    }
+                                    if let Some(call) = part.function_call {
+                                        if !tool_calls.iter().any(|(c, _)| c.name == call.name && c.args == call.args) {
+                                            tool_calls.push((call, part.thought_signature));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
-            // If no tools were called, the response is finished
+            let mut model_parts = Vec::new();
+            if !accumulated_text.is_empty() {
+                model_parts.push(GeminiPart {
+                    text: Some(accumulated_text),
+                    function_call: None,
+                    function_response: None,
+                    thought_signature: None,
+                });
+            }
+
+            for (call, sig) in &tool_calls {
+                model_parts.push(GeminiPart {
+                    text: None,
+                    function_call: Some(call.clone()),
+                    function_response: None,
+                    thought_signature: sig.clone(),
+                });
+            }
+
+            if !model_parts.is_empty() {
+                self.history.push(GeminiContent {
+                    role: Some("model".to_string()),
+                    parts: model_parts,
+                });
+            }
+
             if tool_calls.is_empty() {
                 println!();
                 break;
             }
 
-            // Execute function calls and return function response turn
             let mut response_parts = Vec::new();
-            for call in tool_calls {
+            for (call, _) in tool_calls {
                 println!("\n[Executing tool: {}]", call.name);
                 let output = self.execute_tool(&call).await;
 
@@ -225,18 +261,39 @@ impl Agent {
                 });
             }
 
-            // Push function response back as 'user' role turn per Gemini API specs
             self.history.push(GeminiContent {
                 role: Some("user".to_string()),
                 parts: response_parts,
             });
         }
-
     }
 }
 
+async fn confirm_execution(call: &FunctionCall) -> bool {
+    let call = call.clone();
+    
+    task::spawn_blocking(move || -> bool {
+        println!("\n The agent wants to execute a potentially destructive tool:");
+        println!("   Function : {}", call.name);
+        println!("   Arguments: {}", call.args);
+        print!("   Allow execution? [y/N]: ");
+        
+        let _ = io::stdout().flush();
+    
+        let mut input = String::new();
+        if std::io::stdin().read_line(&mut input).is_ok() {
+            let trimmed = input.trim().to_lowercase();
+            trimmed == "y" || trimmed == "yes"
+        } else {
+            false
+        }
+    })
+    .await
+    .unwrap_or(false)
+}
+
 pub fn get_tool_declarations() -> Vec<Tool> {
-    vec![Tool {
+    let tools = vec![Tool {
         function_declarations: vec![
             FunctionDeclaration {
                 name: "list_files".to_string(),
@@ -299,5 +356,7 @@ pub fn get_tool_declarations() -> Vec<Tool> {
                 }),
             },
         ],
-    }]
+    }];
+
+    tools
 }
