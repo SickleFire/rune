@@ -16,7 +16,7 @@ pub struct GeminiRequest {
     pub tools: Option<Vec<Tool>>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct GeminiContent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
@@ -77,7 +77,7 @@ pub struct FunctionDeclaration {
 pub struct Agent {
     client: reqwest::Client,
     api_key: String,
-    model: String,
+    pub model: String,
     history: Vec<GeminiContent>,
     executor: ToolExecutor,
     tools: Vec<Tool>,
@@ -99,6 +99,33 @@ impl Agent {
         agent
     }
 
+    pub fn get_workspace_root(&self) -> &PathBuf {
+        &self.workspace_root
+    }
+
+    pub fn get_history_stats(&self) -> (usize, usize) {
+        let message_count = self.history.len();
+        let total_chars: usize = self.history.iter()
+            .flat_map(|c| &c.parts)
+            .filter_map(|p| p.text.as_deref())
+            .map(|t| t.len())
+            .sum();
+        (message_count, total_chars)
+    }
+
+    pub fn save_session(&self, path: &Path) -> Result<(), std::io::Error> {
+        let json = serde_json::to_string_pretty(&self.history)?;
+        std::fs::write(path, json)?;
+        Ok(())
+    }
+
+    pub fn load_session(&mut self, path: &Path) -> Result<(), std::io::Error> {
+        let json = std::fs::read_to_string(path)?;
+        let loaded_history: Vec<GeminiContent> = serde_json::from_str(&json)?;
+        self.history = loaded_history;
+        Ok(())
+    }
+
     fn initialize_system_context(&mut self) {
         let project_map = self.build_project_map(&self.workspace_root, "");
         let system_prompt = format!(
@@ -111,7 +138,8 @@ impl Agent {
             - You have global awareness of the repository architecture from the file tree above.\n\
             - When the user mentions specific files using `@filename` (e.g. `@src/api.rs`), those files are automatically loaded and injected into your prompt context.\n\
             - Use `search_code` (powered by the `cix` indexed search engine) to instantly search for functions, symbols, or patterns across the repository when you need to locate code.\n\
-            - Use `read_file`, `list_files`, `write_file`, `execute_commands`, and `execute_batch` as needed to inspect and modify code.\n\
+            - Use `read_file`, `list_files`, `write_file`, `patch_file`, `execute_commands`, and `execute_batch` as needed to inspect and modify code.\n\
+            - Prefer `patch_file` over `write_file` for surgical code edits using search and replace blocks.\n\
             - Be concise, precise, and proactive.",
             project_map
         );
@@ -136,7 +164,7 @@ impl Agent {
         });
     }
 
-    fn build_project_map(&self, dir: &Path, prefix: &str) -> String {
+    pub fn build_project_map(&self, dir: &Path, prefix: &str) -> String {
         let mut output = String::new();
         let entries = match std::fs::read_dir(dir) {
             Ok(entries) => entries,
@@ -189,76 +217,98 @@ impl Agent {
         self.initialize_system_context();
     }
 
-    async fn execute_tool(&self, call: &FunctionCall) -> String {
-        if self.is_destructive_tool(call) {
-            if !confirm_execution(call).await {
-                println!("\n[Execution cancelled by user for: {}]", call.name);
-                return "Tool execution rejected by user.".to_string();
-            }
-        }
+    async fn execute_tool(&self, call: &FunctionCall, auto_approve: bool) -> String {
+        if call.name.as_str() == "patch_file" {
+            let path = call.args["path"].as_str().unwrap_or("");
+            let search = call.args["search"].as_str().unwrap_or("");
+            let replace = call.args["replace"].as_str().unwrap_or("");
 
-        match call.name.as_str() {
-            "list_files" => {
-                let path = call.args["path"].as_str().unwrap_or(".");
-                match self.executor.list_files(Path::new(path)).await {
-                    Ok(files) => files,
-                    Err(e) => format!("Error listing files: {e}"),
+            match self.executor.preview_patch(Path::new(path), search, replace).await {
+                Ok((safe_path, new_content)) => {
+                    let search_len = search.len();
+                    let replace_len = replace.len();
+                    if !auto_approve && !confirm_execution(call).await {
+                        println!("\n[Execution cancelled by user for: {}]", call.name);
+                        return "Tool execution rejected by user.".to_string();
+                    }
+                    match self.executor.apply_patch(&safe_path, &new_content, search_len, replace_len).await {
+                        Ok(_) => "File Patched Successfully.".to_string(),
+                        Err(e) => format!("Error applying patch: {e}"),
+                    }
+                }
+                Err(e) => format!("Error previewing patch: {e}"),
+            }
+        } else {
+            if self.is_destructive_tool(call) {
+                if !auto_approve && !confirm_execution(call).await {
+                    println!("\n[Execution cancelled by user for: {}]", call.name);
+                    return "Tool execution rejected by user.".to_string();
                 }
             }
-            "read_file" => {
-                let path = call.args["path"].as_str().unwrap_or("");
-                match self.executor.read_file(Path::new(path)).await {
-                    Ok(content) => content,
-                    Err(e) => format!("Error reading file: {e}"),
-                }
-            }
-            "write_file" => {
-                let path = call.args["path"].as_str().unwrap_or("");
-                let content = call.args["content"].as_str().unwrap_or("");
-                match self.executor.write_file(Path::new(path), content).await {
-                    Ok(_) => "File Written Successfully.".to_string(),
-                    Err(e) => format!("Error writing file: {e}"),
-                }
-            }
-            "search_code" => {
-                let query = call.args["query"].as_str().unwrap_or("");
-                match self.executor.search_code(query).await {
-                    Ok(output) => output,
-                    Err(e) => format!("Error executing cix search: {e}"),
-                }
-            }
-            "execute_commands" => {
-                let cmd = call.args["cmd"].as_str().unwrap_or("");
-                match self.executor.execute_commands(cmd).await {
-                    Ok(output) => output,
-                    Err(e) => format!("Error executing command: {e}"),
-                }
-            }
-            "execute_batch" => {
-                let cmds_val = &call.args["commands"];
-                let cmds: Vec<String> = if let Some(arr) = cmds_val.as_array() {
-                    arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
-                } else if let Some(s) = cmds_val.as_str() {
-                    vec![s.to_string()]
-                } else {
-                    Vec::new()
-                };
 
-                match self.executor.execute_batch(&cmds).await {
-                    Ok(output) => output,
-                    Err(e) => format!("Error executing batch commands: {e}"),
+            match call.name.as_str() {
+                "list_files" => {
+                    let path = call.args["path"].as_str().unwrap_or(".");
+                    match self.executor.list_files(Path::new(path)).await {
+                        Ok(files) => files,
+                        Err(e) => format!("Error listing files: {e}"),
+                    }
                 }
+                "read_file" => {
+                    let path = call.args["path"].as_str().unwrap_or("");
+                    match self.executor.read_file(Path::new(path)).await {
+                        Ok(content) => content,
+                        Err(e) => format!("Error reading file: {e}"),
+                    }
+                }
+                "write_file" => {
+                    let path = call.args["path"].as_str().unwrap_or("");
+                    let content = call.args["content"].as_str().unwrap_or("");
+                    match self.executor.write_file(Path::new(path), content).await {
+                        Ok(_) => "File Written Successfully.".to_string(),
+                        Err(e) => format!("Error writing file: {e}"),
+                    }
+                }
+                "search_code" => {
+                    let query = call.args["query"].as_str().unwrap_or("");
+                    match self.executor.search_code(query).await {
+                        Ok(output) => output,
+                        Err(e) => format!("Error executing cix search: {e}"),
+                    }
+                }
+                "execute_commands" => {
+                    let cmd = call.args["cmd"].as_str().unwrap_or("");
+                    match self.executor.execute_commands(cmd).await {
+                        Ok(output) => output,
+                        Err(e) => format!("Error executing command: {e}"),
+                    }
+                }
+                "execute_batch" => {
+                    let cmds_val = &call.args["commands"];
+                    let cmds: Vec<String> = if let Some(arr) = cmds_val.as_array() {
+                        arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
+                    } else if let Some(s) = cmds_val.as_str() {
+                        vec![s.to_string()]
+                    } else {
+                        Vec::new()
+                    };
+
+                    match self.executor.execute_batch(&cmds).await {
+                        Ok(output) => output,
+                        Err(e) => format!("Error executing batch commands: {e}"),
+                    }
+                }
+                unknown => format!("Error: Unknown tool function '{unknown}'"),
             }
-            unknown => format!("Error: Unknown tool function '{unknown}'"),
         }
     }
 
     fn is_destructive_tool(&self, call: &FunctionCall) -> bool {
-        let is_destructive = matches!(call.name.as_str(), "write_file" | "execute_commands" | "execute_batch");
+        let is_destructive = matches!(call.name.as_str(), "write_file" | "patch_file" | "execute_commands" | "execute_batch");
         is_destructive
     }
 
-    pub async fn run(&mut self, raw_prompt: &str) {
+    pub async fn run(&mut self, raw_prompt: &str, auto_approve: bool) {
         let processed_prompt = self.resolve_mentions(raw_prompt).await;
 
         self.history.push(GeminiContent {
@@ -376,7 +426,7 @@ impl Agent {
             let mut response_parts = Vec::new();
             for (call, _) in tool_calls {
                 println!("\n[Executing tool: {}]", call.name);
-                let output = self.execute_tool(&call).await;
+                let output = self.execute_tool(&call, auto_approve).await;
 
                 response_parts.push(GeminiPart {
                     text: None,
@@ -434,9 +484,8 @@ async fn confirm_execution(call: &FunctionCall) -> bool {
     let call = call.clone();
     
     task::spawn_blocking(move || -> bool {
-        println!("\n The agent wants to execute a potentially destructive tool:");
+        println!("\n The agent wants to execute a potentially destructive tool execution:");
         println!("   Function : {}", call.name);
-        println!("   Arguments: {}", call.args);
         println!("   Allow execution? [y/N]: ");
         
         let _ = io::stdout().flush();
@@ -464,7 +513,7 @@ pub fn get_tool_declarations() -> Vec<Tool> {
                     "properties": {
                         "path": {
                             "type": "STRING",
-                            "description": "Relative directory path (e.g., '.' or 'src')"
+                            "description": "Relative file path"
                         }
                     },
                     "required": ["path"]
@@ -486,7 +535,7 @@ pub fn get_tool_declarations() -> Vec<Tool> {
             },
             FunctionDeclaration {
                 name: "write_file".to_string(),
-                description: "Write or overwrite content to a specified file path.".to_string(),
+                description: "Write or overwrite content to a specified file path (use for creating new files or complete overwrites).".to_string(),
                 parameters: serde_json::json!({
                     "type": "OBJECT",
                     "properties": {
@@ -503,6 +552,28 @@ pub fn get_tool_declarations() -> Vec<Tool> {
                 }),
             },
             FunctionDeclaration {
+                name: "patch_file".to_string(),
+                description: "Perform a surgical search-and-replace patch on a file. Preferred for editing existing files to avoid rewriting large files and reduce token usage.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "OBJECT",
+                    "properties": {
+                        "path": {
+                            "type": "STRING",
+                            "description": "Relative file path"
+                        },
+                        "search": {
+                            "type": "STRING",
+                            "description": "Exact search block snippet to locate in the file"
+                        },
+                        "replace": {
+                            "type": "STRING",
+                            "description": "Replacement block snippet"
+                        }
+                    },
+                    "required": ["path", "search", "replace"]
+                }),
+            },
+            FunctionDeclaration {
                 name: "search_code".to_string(),
                 description: "Search the codebase using the cix indexed search engine for functions, symbols, or queries.".to_string(),
                 parameters: serde_json::json!({
@@ -510,7 +581,7 @@ pub fn get_tool_declarations() -> Vec<Tool> {
                     "properties": {
                         "query": {
                             "type": "STRING",
-                            "description": "Search query term or pattern (e.g. 'ToolExecutor' or 'sanitize_path')"
+                            "description": "Search query term or print pattern (e.g. 'ToolExecutor' or 'sanitize_path')"
                         }
                     },
                     "required": ["query"]

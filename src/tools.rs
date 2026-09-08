@@ -129,6 +129,62 @@ impl ToolExecutor {
         ))
     }
 
+    pub async fn preview_patch(&self, path: &Path, search: &str, replace: &str) -> Result<(PathBuf, String), std::io::Error> {
+        let safe_path = self.sanitize_path(path)?;
+        
+        let old_content = match tokio::fs::read_to_string(&safe_path).await {
+            Ok(c) => c,
+            Err(e) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("Failed to read file for patching {:?}: {}", safe_path, e),
+                ));
+            }
+        };
+
+        // Check exact occurrence of search block
+        let count = old_content.matches(search).count();
+        if count == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("Search block not found in file {:?}", path),
+            ));
+        }
+        if count > 1 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("Search block matches {} times in file {:?}. Must be unique.", count, path),
+            ));
+        }
+
+        let new_content = old_content.replacen(search, replace, 1);
+
+        println!("\n{}: {}", "PREVIEW PATCH FOR".bold().cyan(), path.display().to_string().yellow());
+        let diff = TextDiff::from_lines(old_content.as_str(), new_content.as_str());
+        for change in diff.iter_all_changes() {
+            let (sign, line_str) = match change.tag() {
+                ChangeTag::Delete => ("- ", format!("{}", change).red()),
+                ChangeTag::Insert => ("+ ", format!("{}", change).green()),
+                ChangeTag::Equal => ("  ", format!("{}", change).normal()),
+            };
+            print!("{}{}", sign.dimmed(), line_str);
+        }
+        println!();
+
+        Ok((safe_path, new_content))
+    }
+
+    pub async fn apply_patch(&self, safe_path: &Path, new_content: &str, search_len: usize, replace_len: usize) -> Result<String, std::io::Error> {
+        tokio::fs::write(safe_path, new_content).await?;
+
+        Ok(format!(
+            "Successfully patched file {:?} (replaced {} bytes with {} bytes)",
+            safe_path,
+            search_len,
+            replace_len
+        ))
+    }
+
     pub async fn list_files(&self, path: &Path) -> Result<String, std::io::Error> {
         let safe_path = self.sanitize_path(path)?;
         let mut entries = tokio::fs::read_dir(safe_path).await?;
@@ -304,5 +360,21 @@ mod tests {
         let executor = ToolExecutor::new(dir.path().to_path_buf());
         let safe = executor.sanitize_path(Path::new("subdir/../file.txt"));
         assert!(safe.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_patch_file() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.txt");
+        tokio::fs::write(&file_path, "Hello world!\nThis is a test file.\nGoodbye.\n").await.unwrap();
+
+        let executor = ToolExecutor::new(dir.path().to_path_buf());
+        let (safe_path, new_content) = executor.preview_patch(Path::new("test.txt"), "This is a test file.", "This is a patched file.").await.unwrap();
+        let res = executor.apply_patch(&safe_path, &new_content, "This is a test file.".len(), "This is a patched file.".len()).await;
+        assert!(res.is_ok());
+
+        let new_content = tokio::fs::read_to_string(&file_path).await.unwrap();
+        assert!(new_content.contains("This is a patched file."));
+        assert!(!new_content.contains("This is a test file."));
     }
 }
