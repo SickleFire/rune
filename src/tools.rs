@@ -377,7 +377,6 @@ impl ToolExecutor {
     }
 
     pub async fn git_commit(&self, message: &str) -> Result<String, std::io::Error> {
-        self.create_git_checkpoint(message).await;
         let cmd = format!("git add -A && git commit -m \"{}\"", message);
         self.execute_commands(&cmd).await
     }
@@ -387,38 +386,29 @@ impl ToolExecutor {
             Ok(w) => w,
             Err(_) => return,
         };
-
-        // Check if git repository exists
+    
         let is_git = Command::new("git")
             .current_dir(&canonical_workspace)
             .args(["rev-parse", "--is-inside-work-tree"])
-            .status()
+            .output()
             .await
-            .map(|s| s.success())
+            .map(|o| o.status.success())
             .unwrap_or(false);
-
+    
         if !is_git {
             return;
         }
-
-        // Stage all changes and stash with message
+    
         let _ = Command::new("git")
             .current_dir(&canonical_workspace)
             .args(["add", "-A"])
-            .status()
+            .output()
             .await;
-
+    
         let _ = Command::new("git")
             .current_dir(&canonical_workspace)
             .args(["stash", "push", "-m", message])
-            .status()
-            .await;
-
-        // Immediately pop or apply gently so working tree stays active, while keeping a copy in stash
-        let _ = Command::new("git")
-            .current_dir(&canonical_workspace)
-            .args(["stash", "apply"])
-            .status()
+            .output()
             .await;
     }
 }
