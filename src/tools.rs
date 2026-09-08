@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
+use std::io;
 
 pub struct ToolExecutor {
     workspace_root: PathBuf,
@@ -10,27 +11,110 @@ impl ToolExecutor {
         Self { workspace_root }
     }
 
+    pub fn sanitize_path(&self, user_path: &Path) -> io::Result<PathBuf> {
+        let canonical_workspace = dunce::canonicalize(&self.workspace_root)?;
+        
+        if user_path.is_absolute() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("Access denied: absolute path '{:?}' not allowed", user_path),
+            ));
+        }
+
+        // Evaluate path structure through Path::components()
+        let mut resolved = canonical_workspace.clone();
+        for component in user_path.components() {
+            match component {
+                std::path::Component::Normal(name) => {
+                    resolved.push(name);
+                }
+                std::path::Component::CurDir => {
+                    // '.' - do nothing
+                }
+                std::path::Component::ParentDir => {
+                    // '..' - pop from resolved
+                    if !resolved.pop() {
+                        return Err(io::Error::new(
+                            io::ErrorKind::PermissionDenied,
+                            format!("Access denied: '{:?}' escapes workspace boundary", user_path),
+                        ));
+                    }
+                }
+                _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        format!("Invalid path component in '{:?}'", user_path),
+                    ));
+                }
+            }
+
+            // Ensure we haven't escaped the workspace boundary during component accumulation
+            if !resolved.starts_with(&canonical_workspace) {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    format!("Access denied: '{:?}' escapes workspace boundary", user_path),
+                ));
+            }
+        }
+
+        // Handle non-existent paths by walking up ancestors of the resolved path
+        let mut ancestor = resolved.as_path();
+        let mut tail_components = Vec::new();
+
+        while !ancestor.exists() {
+            if let Some(parent) = ancestor.parent() {
+                if let Some(name) = ancestor.file_name() {
+                    tail_components.push(name);
+                }
+                ancestor = parent;
+            } else {
+                break;
+            }
+        }
+
+        tail_components.reverse();
+
+        let canonical_ancestor = dunce::canonicalize(ancestor)?;
+
+        let mut final_target = canonical_ancestor;
+        for component in tail_components {
+            final_target.push(component);
+        }
+
+        if !final_target.starts_with(&canonical_workspace) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("Access denied: '{:?}' escapes workspace boundary", user_path),
+            ));
+        }
+
+        Ok(final_target)
+    }
+
     pub async fn read_file(&self, path: &Path) -> Result<String, std::io::Error> {
-        let content = tokio::fs::read_to_string(path).await?;
+        let safe_path = self.sanitize_path(path)?;
+        let content = tokio::fs::read_to_string(safe_path).await?;
         Ok(content)
     }
 
     pub async fn write_file(&self, path: &Path, content: &str) -> Result<String, std::io::Error> {
-        if let Some(parent) = path.parent() {
+        let safe_path = self.sanitize_path(path)?;
+        if let Some(parent) = safe_path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
 
-        tokio::fs::write(path, content).await?;
+        tokio::fs::write(safe_path.clone(), content).await?;
 
         Ok(format!(
             "Successfully wrote {} bytes to {:?}",
             content.len(),
-            path
+            safe_path
         ))
     }
 
     pub async fn list_files(&self, path: &Path) -> Result<String, std::io::Error> {
-        let mut entries = tokio::fs::read_dir(path).await?;
+        let safe_path = self.sanitize_path(path)?;
+        let mut entries = tokio::fs::read_dir(safe_path).await?;
         let mut output = String::new();
 
         while let Some(entry) = entries.next_entry().await? {
@@ -48,7 +132,21 @@ impl ToolExecutor {
     }
 
     pub async fn execute_commands(&self, cmd: &str) -> Result<String, std::io::Error> {
-        let output = Command::new("cmd").args(["/C", cmd]).output().await?;
+        let canonical_workspace = dunce::canonicalize(&self.workspace_root)?;
+
+        #[cfg(target_os = "windows")]
+        let output = Command::new("cmd")
+            .current_dir(canonical_workspace)
+            .args(["/C", cmd])
+            .output()
+            .await?;
+
+        #[cfg(not(target_os = "windows"))]
+        let output = Command::new("sh")
+            .current_dir(canonical_workspace)
+            .args(["-c", cmd])
+            .output()
+            .await?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -59,5 +157,35 @@ impl ToolExecutor {
         );
 
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_sanitize_path_normal() {
+        let dir = tempdir().unwrap();
+        let executor = ToolExecutor::new(dir.path().to_path_buf());
+        let safe = executor.sanitize_path(Path::new("src/main.rs")).unwrap();
+        assert!(safe.starts_with(dunce::canonicalize(dir.path()).unwrap()));
+    }
+
+    #[test]
+    fn test_sanitize_path_relative_traversal_escape() {
+        let dir = tempdir().unwrap();
+        let executor = ToolExecutor::new(dir.path().to_path_buf());
+        let res = executor.sanitize_path(Path::new("non_existent_dir/../../etc/passwd"));
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_sanitize_path_dot_dot_inside() {
+        let dir = tempdir().unwrap();
+        let executor = ToolExecutor::new(dir.path().to_path_buf());
+        let safe = executor.sanitize_path(Path::new("subdir/../file.txt"));
+        assert!(safe.is_ok());
     }
 }

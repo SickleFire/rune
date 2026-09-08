@@ -11,7 +11,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let api_key = env::var("GEMINI_API_KEY")
         .expect("Please set the GEMINI_API_KEY environment variable");
 
-    let mut agent = Agent::new(api_key, workspace_root);
+    let model = env::var("GEMINI_MODEL")
+        .unwrap_or("gemini-3.5-flash-lite".to_string());
+
+    let mut agent = Agent::new(api_key, workspace_root, model);
 
     let mut rl = DefaultEditor::new()?;
     let history_file = env::temp_dir().join(".rune_history");
@@ -30,8 +33,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
 
                 if prompt.eq_ignore_ascii_case("exit") || prompt.eq_ignore_ascii_case("quit") {
-                    println!("Goodbye!");
+                    println!("exiting.");
                     break;
+                }
+
+                if prompt.eq_ignore_ascii_case("/clear") || prompt.eq_ignore_ascii_case("/reset") {
+                    agent.clear_history();
+                    println!("cleared history.");
+                }
+
+                if prompt.eq_ignore_ascii_case("/tools") {
+                    println!("TOOLS:");
+                    println!("list files");
+                    println!("read files");
+                    println!("write files");
+                    println!("execute commands");
+                }
+
+                if prompt.eq_ignore_ascii_case("/help") {
+                    println!("HELP:");
                 }
 
                 let _ = rl.add_history_entry(prompt);

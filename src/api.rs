@@ -70,20 +70,26 @@ pub struct FunctionDeclaration {
 pub struct Agent {
     client: reqwest::Client,
     api_key: String,
+    model: String,
     history: Vec<GeminiContent>,
     executor: ToolExecutor,
     tools: Vec<Tool>,
 }
 
 impl Agent {
-    pub fn new(api_key: String, workspace_root: PathBuf) -> Self {
+    pub fn new(api_key: String, workspace_root: PathBuf, model: String) -> Self {
         Self {
             client: reqwest::Client::new(),
             api_key,
+            model,
             history: Vec::new(),
             executor: ToolExecutor::new(workspace_root),
             tools: get_tool_declarations(),
         }
+    }
+
+    pub fn clear_history(&mut self) {
+        self.history.clear();
     }
 
     async fn execute_tool(&self, call: &FunctionCall) -> String {
@@ -145,7 +151,8 @@ impl Agent {
         });
 
         let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:streamGenerateContent?alt=sse&key={}",
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:streamGenerateContent?alt=sse&key={}",
+            self.model,
             self.api_key
         );
 
@@ -343,7 +350,7 @@ pub fn get_tool_declarations() -> Vec<Tool> {
             },
             FunctionDeclaration {
                 name: "execute_commands".to_string(),
-                description: "Execute a shell command on Windows CLI.".to_string(),
+                description: "Execute a shell command.".to_string(),
                 parameters: serde_json::json!({
                     "type": "OBJECT",
                     "properties": {
