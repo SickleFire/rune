@@ -51,7 +51,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     println!("  - read_file        : Read the full text content of a file");
                     println!("  - write_file       : Write or overwrite content to a file (requires confirmation)");
                     println!("  - search_code      : Instant BM25 code search via cix binary");
-                    println!("  - execute_commands : Run shell commands like cargo check (requires confirmation)");
+                    println!("  - execute_commands : Run a single shell command (requires confirmation)");
+                    println!("  - execute_batch    : Run a batch of sequential shell commands (requires confirmation)");
                     continue;
                 }
 

@@ -111,7 +111,7 @@ impl Agent {
             - You have global awareness of the repository architecture from the file tree above.\n\
             - When the user mentions specific files using `@filename` (e.g. `@src/api.rs`), those files are automatically loaded and injected into your prompt context.\n\
             - Use `search_code` (powered by the `cix` indexed search engine) to instantly search for functions, symbols, or patterns across the repository when you need to locate code.\n\
-            - Use `read_file`, `list_files`, `write_file`, and `execute_commands` as needed to inspect and modify code.\n\
+            - Use `read_file`, `list_files`, `write_file`, `execute_commands`, and `execute_batch` as needed to inspect and modify code.\n\
             - Be concise, precise, and proactive.",
             project_map
         );
@@ -234,12 +234,27 @@ impl Agent {
                     Err(e) => format!("Error executing command: {e}"),
                 }
             }
+            "execute_batch" => {
+                let cmds_val = &call.args["commands"];
+                let cmds: Vec<String> = if let Some(arr) = cmds_val.as_array() {
+                    arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
+                } else if let Some(s) = cmds_val.as_str() {
+                    vec![s.to_string()]
+                } else {
+                    Vec::new()
+                };
+
+                match self.executor.execute_batch(&cmds).await {
+                    Ok(output) => output,
+                    Err(e) => format!("Error executing batch commands: {e}"),
+                }
+            }
             unknown => format!("Error: Unknown tool function '{unknown}'"),
         }
     }
 
     fn is_destructive_tool(&self, call: &FunctionCall) -> bool {
-        let is_destructive = matches!(call.name.as_str(), "write_file" | "execute_commands");
+        let is_destructive = matches!(call.name.as_str(), "write_file" | "execute_commands" | "execute_batch");
         is_destructive
     }
 
@@ -503,7 +518,7 @@ pub fn get_tool_declarations() -> Vec<Tool> {
             },
             FunctionDeclaration {
                 name: "execute_commands".to_string(),
-                description: "Execute a shell command.".to_string(),
+                description: "Execute a single shell command.".to_string(),
                 parameters: serde_json::json!({
                     "type": "OBJECT",
                     "properties": {
@@ -513,6 +528,23 @@ pub fn get_tool_declarations() -> Vec<Tool> {
                         }
                     },
                     "required": ["cmd"]
+                }),
+            },
+            FunctionDeclaration {
+                name: "execute_batch".to_string(),
+                description: "Execute a batch of sequential shell commands in the workspace.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "OBJECT",
+                    "properties": {
+                        "commands": {
+                            "type": "ARRAY",
+                            "items": {
+                                "type": "STRING"
+                            },
+                            "description": "List of shell command strings to execute sequentially (e.g. ['cargo check', 'cargo test'])"
+                        }
+                    },
+                    "required": ["commands"]
                 }),
             },
         ],

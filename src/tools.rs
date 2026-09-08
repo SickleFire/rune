@@ -233,6 +233,31 @@ impl ToolExecutor {
 
         Ok(result)
     }
+
+    pub async fn execute_batch(&self, commands: &[String]) -> Result<String, std::io::Error> {
+        let mut batch_output = String::new();
+        
+        for (i, cmd) in commands.iter().enumerate() {
+            batch_output.push_str(&format!("=== [Command {}/{}: {}] ===\n", i + 1, commands.len(), cmd));
+            match self.execute_commands(cmd).await {
+                Ok(result) => {
+                    batch_output.push_str(&result);
+                    batch_output.push_str("\n\n");
+                
+                    if result.contains("Exit Code: 1") || result.contains("Exit Code: exit status: 1") || result.contains("Exit Code: 101") {
+                        batch_output.push_str("[Batch execution halted due to non-zero exit code]\n");
+                        break;
+                    }
+                }
+                Err(e) => {
+                    batch_output.push_str(&format!("Error executing command: {}\n\n", e));
+                    break;
+                }
+            }
+        }
+
+        Ok(batch_output)
+    }
 }
 
 #[cfg(test)]
