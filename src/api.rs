@@ -3,10 +3,12 @@ use serde::{Deserialize, Serialize};
 use std::eprintln;
 use std::path::Path;
 use std::path::PathBuf;
+use std::println;
 use futures_util::StreamExt;
 use tokio::io;
 use tokio::io::AsyncWriteExt;
 use tokio::task;
+
 #[derive(Serialize)]
 pub struct GeminiRequest {
     pub contents: Vec<GeminiContent>,
@@ -47,26 +49,31 @@ pub struct GeminiCandidate {
 pub struct GeminiResponseContent {
     pub parts: Vec<GeminiPart>,
 }
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct FunctionCall {
     pub name: String,
     pub args: serde_json::Value,
 }
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct FunctionResponse {
     pub name: String,
     pub response: serde_json::Value,
 }
+
 #[derive(Serialize, Clone)]
 pub struct Tool {
     pub function_declarations: Vec<FunctionDeclaration>,
 }
+
 #[derive(Serialize, Clone)]
 pub struct FunctionDeclaration {
     pub name: String,
     pub description: String,
     pub parameters: serde_json::Value,
 }
+
 pub struct Agent {
     client: reqwest::Client,
     api_key: String,
@@ -74,22 +81,112 @@ pub struct Agent {
     history: Vec<GeminiContent>,
     executor: ToolExecutor,
     tools: Vec<Tool>,
+    workspace_root: PathBuf,
 }
 
 impl Agent {
     pub fn new(api_key: String, workspace_root: PathBuf, model: String) -> Self {
-        Self {
+        let mut agent = Self {
             client: reqwest::Client::new(),
             api_key,
             model,
             history: Vec::new(),
-            executor: ToolExecutor::new(workspace_root),
+            executor: ToolExecutor::new(workspace_root.clone()),
             tools: get_tool_declarations(),
+            workspace_root,
+        };
+        agent.initialize_system_context();
+        agent
+    }
+
+    fn initialize_system_context(&mut self) {
+        let project_map = self.build_project_map(&self.workspace_root, "");
+        let system_prompt = format!(
+            "You are Rune, an expert AI coding assistant integrated into a software development workspace.\n\
+            \n\
+            ## Repository Architecture & File Tree:\n\
+            {}\n\
+            \n\
+            ## Guidelines & Smart Context:\n\
+            - You have global awareness of the repository architecture from the file tree above.\n\
+            - When the user mentions specific files using `@filename` (e.g. `@src/api.rs`), those files are automatically loaded and injected into your prompt context.\n\
+            - Use `search_code` (powered by the `cix` indexed search engine) to instantly search for functions, symbols, or patterns across the repository when you need to locate code.\n\
+            - Use `read_file`, `list_files`, `write_file`, and `execute_commands` as needed to inspect and modify code.\n\
+            - Be concise, precise, and proactive.",
+            project_map
+        );
+
+        self.history.push(GeminiContent {
+            role: Some("user".to_string()),
+            parts: vec![GeminiPart {
+                text: Some(format!("[SYSTEM ARCHITECTURE INITIALIZATION]\n{}", system_prompt)),
+                function_call: None,
+                function_response: None,
+                thought_signature: None,
+            }],
+        });
+        self.history.push(GeminiContent {
+            role: Some("model".to_string()),
+            parts: vec![GeminiPart {
+                text: Some("Understood. I have loaded the repository architecture and am ready to assist you. You can `@mention` files or ask me to search and modify code.".to_string()),
+                function_call: None,
+                function_response: None,
+                thought_signature: None,
+            }],
+        });
+    }
+
+    fn build_project_map(&self, dir: &Path, prefix: &str) -> String {
+        let mut output = String::new();
+        let entries = match std::fs::read_dir(dir) {
+            Ok(entries) => entries,
+            Err(_) => return format!("{} [Error reading directory]\n", prefix),
+        };
+
+        let mut paths: Vec<_> = entries.filter_map(|e| e.ok()).collect();
+        paths.sort_by(|a, b| {
+            let a_is_dir = a.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+            let b_is_dir = b.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+            if a_is_dir != b_is_dir {
+                b_is_dir.cmp(&a_is_dir)
+            } else {
+                a.file_name().cmp(&b.file_name())
+            }
+        });
+
+        let filtered: Vec<_> = paths
+            .into_iter()
+            .filter(|e| {
+                let name = e.file_name();
+                let name_str = name.to_string_lossy();
+                name_str != "target" && name_str != ".git" && name_str != ".DS_Store" && !name_str.ends_with(".rs.bk")
+            })
+            .collect();
+
+        let count = filtered.len();
+        for (i, entry) in filtered.into_iter().enumerate() {
+            let is_last = i == count - 1;
+            let connector = if is_last { "└── " } else { "├── " };
+            let file_name = entry.file_name();
+            let name_str = file_name.to_string_lossy();
+            let file_path = entry.path();
+
+            if file_path.is_dir() {
+                output.push_str(&format!("{}{}{}/\n", prefix, connector, name_str));
+                let extension = if is_last { "    " } else { "│   " };
+                let new_prefix = format!("{}{}", prefix, extension);
+                output.push_str(&self.build_project_map(&file_path, &new_prefix));
+            } else {
+                output.push_str(&format!("{}{}{}\n", prefix, connector, name_str));
+            }
         }
+
+        output
     }
 
     pub fn clear_history(&mut self) {
         self.history.clear();
+        self.initialize_system_context();
     }
 
     async fn execute_tool(&self, call: &FunctionCall) -> String {
@@ -123,6 +220,13 @@ impl Agent {
                     Err(e) => format!("Error writing file: {e}"),
                 }
             }
+            "search_code" => {
+                let query = call.args["query"].as_str().unwrap_or("");
+                match self.executor.search_code(query).await {
+                    Ok(output) => output,
+                    Err(e) => format!("Error executing cix search: {e}"),
+                }
+            }
             "execute_commands" => {
                 let cmd = call.args["cmd"].as_str().unwrap_or("");
                 match self.executor.execute_commands(cmd).await {
@@ -139,11 +243,13 @@ impl Agent {
         is_destructive
     }
 
-    pub async fn run(&mut self, prompt: &str) {
+    pub async fn run(&mut self, raw_prompt: &str) {
+        let processed_prompt = self.resolve_mentions(raw_prompt).await;
+
         self.history.push(GeminiContent {
             role: Some("user".to_string()),
             parts: vec![GeminiPart {
-                text: Some(prompt.to_string()),
+                text: Some(processed_prompt),
                 function_call: None,
                 function_response: None,
                 thought_signature: None,
@@ -274,6 +380,39 @@ impl Agent {
             });
         }
     }
+
+    async fn resolve_mentions(&self, raw_prompt: &str) -> String {
+        let words: Vec<&str> = raw_prompt.split_whitespace().collect();
+        let mut resolved_prompt = raw_prompt.to_string();
+        let mut injected_files = Vec::new();
+
+        for word in words {
+            if word.starts_with('@') && word.len() > 1 {
+                let file_path_str = &word[1..];
+                let clean_path = file_path_str.trim_matches(|c: char| !c.is_alphanumeric() && c != '/' && c != '.' && c != '-' && c != '_');
+                
+                if !clean_path.is_empty() {
+                    match self.executor.read_file(Path::new(clean_path)).await {
+                        Ok(content) => {
+                            injected_files.push(format!("\n\n[Auto-injected content of @{}]:\n```\n{}\n```", clean_path, content));
+                            println!("[Rune: Auto-scraped @{} into context]", clean_path);
+                        }
+                        Err(e) => {
+                            println!("[Rune: Warning: failed to read @{}: {}]", clean_path, e);
+                        }
+                    }
+                }
+            }
+        }
+
+        if !injected_files.is_empty() {
+            for injection in injected_files {
+                resolved_prompt.push_str(&injection);
+            }
+        }
+
+        resolved_prompt
+    }
 }
 
 async fn confirm_execution(call: &FunctionCall) -> bool {
@@ -283,7 +422,7 @@ async fn confirm_execution(call: &FunctionCall) -> bool {
         println!("\n The agent wants to execute a potentially destructive tool:");
         println!("   Function : {}", call.name);
         println!("   Arguments: {}", call.args);
-        print!("   Allow execution? [y/N]: ");
+        println!("   Allow execution? [y/N]: ");
         
         let _ = io::stdout().flush();
     
@@ -324,7 +463,7 @@ pub fn get_tool_declarations() -> Vec<Tool> {
                     "properties": {
                         "path": {
                             "type": "STRING",
-                            "description": "Relative file path (e.g., 'src/main.rs')"
+                            "description": "Global or relative file path (e.g., 'src/main.rs')"
                         }
                     },
                     "required": ["path"]
@@ -346,6 +485,20 @@ pub fn get_tool_declarations() -> Vec<Tool> {
                         }
                     },
                     "required": ["path", "content"]
+                }),
+            },
+            FunctionDeclaration {
+                name: "search_code".to_string(),
+                description: "Search the codebase using the cix indexed search engine for functions, symbols, or queries.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "OBJECT",
+                    "properties": {
+                        "query": {
+                            "type": "STRING",
+                            "description": "Search query term or pattern (e.g. 'ToolExecutor' or 'sanitize_path')"
+                        }
+                    },
+                    "required": ["query"]
                 }),
             },
             FunctionDeclaration {

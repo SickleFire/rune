@@ -131,6 +131,81 @@ impl ToolExecutor {
         Ok(output)
     }
 
+    pub async fn search_code(&self, query: &str) -> Result<String, std::io::Error> {
+        let canonical_workspace = dunce::canonicalize(&self.workspace_root)?;
+        
+        let cix_result = Command::new("cix")
+            .current_dir(&canonical_workspace)
+            .arg(query)
+            .arg(&canonical_workspace)
+            .output()
+            .await;
+
+        match cix_result {
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+
+                if !output.status.success() && !stdout.trim().is_empty() {
+                    Ok(format!("cix search output:\n{}\nSTDERR:\n{}", stdout, stderr))
+                } else if !output.status.success() {
+                    Ok(format!("cix search error (Exit Code {}):\n{}", output.status, stderr))
+                } else {
+                    Ok(stdout.to_string())
+                }
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                Self::fallback_search(&canonical_workspace, query).await
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    async fn fallback_search(workspace_root: &Path, query: &str) -> Result<String, std::io::Error> {
+        let mut results = String::new();
+        results.push_str("[Note: 'cix' binary not found. Falling back to recursive workspace search]\n\n");
+
+        let mut stack = vec![workspace_root.to_path_buf()];
+        let query_lower = query.to_lowercase();
+
+        let ignore_dirs = [".git", "target", ".cargo", "node_modules"];
+
+        while let Some(dir) = stack.pop() {
+            let mut entries = match tokio::fs::read_dir(&dir).await {
+                Ok(entries) => entries,
+                Err(_) => continue,
+            };
+
+            while let Some(entry) = entries.next_entry().await? {
+                let path = entry.path();
+                let file_name = entry.file_name();
+                let file_name_str = file_name.to_string_lossy();
+
+                if path.is_dir() {
+                    if ignore_dirs.contains(&file_name_str.as_ref()) {
+                        continue;
+                    }
+                    stack.push(path);
+                } else if path.is_file() {
+                    if let Ok(content) = tokio::fs::read_to_string(&path).await {
+                        for (line_num, line) in content.lines().enumerate() {
+                            if line.to_lowercase().contains(&query_lower) {
+                                let rel_path = path.strip_prefix(workspace_root).unwrap_or(&path);
+                                results.push_str(&format!("{}:{}: {}\n", rel_path.display(), line_num + 1, line));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if results.lines().count() <= 1 {
+            results.push_str(&format!("No matches found for query '{}'.\n", query));
+        }
+
+        Ok(results)
+    }
+
     pub async fn execute_commands(&self, cmd: &str) -> Result<String, std::io::Error> {
         let canonical_workspace = dunce::canonicalize(&self.workspace_root)?;
 

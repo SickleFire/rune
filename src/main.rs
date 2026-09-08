@@ -50,6 +50,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     println!("  - list_files       : List files and directories in a given path");
                     println!("  - read_file        : Read the full text content of a file");
                     println!("  - write_file       : Write or overwrite content to a file (requires confirmation)");
+                    println!("  - search_code      : Instant BM25 code search via cix binary");
                     println!("  - execute_commands : Run shell commands like cargo check (requires confirmation)");
                     continue;
                 }
