@@ -47,6 +47,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     continue;
                 }
 
+                if prompt.eq_ignore_ascii_case("/undo") {
+                    match agent.undo().await {
+                        Ok(msg) => println!("{}", msg.green()),
+                        Err(e) => eprintln!("{}", format!("Failed to undo: {e}").red()),
+                    }
+                    continue;
+                }
+
                 if prompt.eq_ignore_ascii_case("/context") || prompt.eq_ignore_ascii_case("/tokens") {
                     let (msgs, chars) = agent.get_history_stats();
                     println!("{}", format!("Conversation Context: {} messages, ~{} characters (~{} estimated tokens)", msgs, chars, chars / 4).cyan());
@@ -124,6 +132,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     println!("  - {:<18} : Instant BM25 code search via cix binary", "search_code".green());
                     println!("  - {:<18} : Run a single shell command (requires confirmation)", "execute_commands".green());
                     println!("  - {:<18} : Run a batch of sequential shell commands (requires confirmation)", "execute_batch".green());
+                    println!("  - {:<18} : Check the current git status of the repository", "git_status".green());
+                    println!("  - {:<18} : Show changes in working tree or file path", "git_diff".green());
+                    println!("  - {:<18} : Stage all changes and create a git commit (requires confirmation)", "git_commit".green());
+                    println!("  - {:<18} : Undo the last file mutation via git stash checkpoint", "undo_git_checkpoint".green());
                     continue;
                 }
 

@@ -102,6 +102,8 @@ impl ToolExecutor {
     pub async fn write_file(&self, path: &Path, content: &str) -> Result<String, std::io::Error> {
         let safe_path = self.sanitize_path(path)?;
         
+        self.create_git_checkpoint(&format!("rune: pre-write checkpoint for {:?}", path)).await;
+
         let old_content = tokio::fs::read_to_string(&safe_path).await.unwrap_or_default();
         
         println!("\n{}: {}", "PREVIEW CHANGES FOR".bold().cyan(), path.display().to_string().yellow());
@@ -132,6 +134,8 @@ impl ToolExecutor {
     pub async fn preview_patch(&self, path: &Path, search: &str, replace: &str) -> Result<(PathBuf, String), std::io::Error> {
         let safe_path = self.sanitize_path(path)?;
         
+        self.create_git_checkpoint(&format!("rune: pre-patch checkpoint for {:?}", path)).await;
+
         let old_content = match tokio::fs::read_to_string(&safe_path).await {
             Ok(c) => c,
             Err(e) => {
@@ -308,6 +312,7 @@ impl ToolExecutor {
     }
 
     pub async fn execute_batch(&self, commands: &[String]) -> Result<String, std::io::Error> {
+        self.create_git_checkpoint("rune: pre-batch execution checkpoint").await;
         let mut batch_output = String::new();
         
         for (i, cmd) in commands.iter().enumerate() {
@@ -330,6 +335,91 @@ impl ToolExecutor {
         }
 
         Ok(batch_output)
+    }
+
+    pub async fn undo_git_checkpoint(&self) -> Result<String, std::io::Error> {
+        let canonical_workspace = dunce::canonicalize(&self.workspace_root)?;
+        
+        #[cfg(target_os = "windows")]
+        let status = Command::new("cmd")
+            .current_dir(&canonical_workspace)
+            .args(["/C", "git stash pop"])
+            .status()
+            .await?;
+
+        #[cfg(not(target_os = "windows"))]
+        let status = Command::new("sh")
+            .current_dir(&canonical_workspace)
+            .args(["-c", "git stash pop"])
+            .status()
+            .await?;
+
+        if status.success() {
+            Ok("Successfully popped git stash checkpoint (reverted last agent file mutation).".to_string())
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                "Failed to pop git stash (no stash checkpoint found or git conflict).",
+            ))
+        }
+    }
+
+    pub async fn git_status(&self) -> Result<String, std::io::Error> {
+        self.execute_commands("git status").await
+    }
+
+    pub async fn git_diff(&self, path: Option<&str>) -> Result<String, std::io::Error> {
+        let cmd = match path {
+            Some(p) if !p.is_empty() => format!("git diff {}", p),
+            _ => "git diff".to_string(),
+        };
+        self.execute_commands(&cmd).await
+    }
+
+    pub async fn git_commit(&self, message: &str) -> Result<String, std::io::Error> {
+        self.create_git_checkpoint(message).await;
+        let cmd = format!("git add -A && git commit -m \"{}\"", message);
+        self.execute_commands(&cmd).await
+    }
+
+    async fn create_git_checkpoint(&self, message: &str) {
+        let canonical_workspace = match dunce::canonicalize(&self.workspace_root) {
+            Ok(w) => w,
+            Err(_) => return,
+        };
+
+        // Check if git repository exists
+        let is_git = Command::new("git")
+            .current_dir(&canonical_workspace)
+            .args(["rev-parse", "--is-inside-work-tree"])
+            .status()
+            .await
+            .map(|s| s.success())
+            .unwrap_or(false);
+
+        if !is_git {
+            return;
+        }
+
+        // Stage all changes and stash with message
+        let _ = Command::new("git")
+            .current_dir(&canonical_workspace)
+            .args(["add", "-A"])
+            .status()
+            .await;
+
+        let _ = Command::new("git")
+            .current_dir(&canonical_workspace)
+            .args(["stash", "push", "-m", message])
+            .status()
+            .await;
+
+        // Immediately pop or apply gently so working tree stays active, while keeping a copy in stash
+        let _ = Command::new("git")
+            .current_dir(&canonical_workspace)
+            .args(["stash", "apply"])
+            .status()
+            .await;
     }
 }
 

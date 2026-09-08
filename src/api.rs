@@ -103,6 +103,10 @@ impl Agent {
         &self.workspace_root
     }
 
+    pub async fn undo(&self) -> Result<String, std::io::Error> {
+        self.executor.undo_git_checkpoint().await
+    }
+
     pub fn get_history_stats(&self) -> (usize, usize) {
         let message_count = self.history.len();
         let total_chars: usize = self.history.iter()
@@ -276,6 +280,32 @@ impl Agent {
                         Err(e) => format!("Error executing cix search: {e}"),
                     }
                 }
+                "git_status" => {
+                    match self.executor.git_status().await {
+                        Ok(output) => output,
+                        Err(e) => format!("Error running git status: {e}"),
+                    }
+                }
+                "git_diff" => {
+                    let path = call.args["path"].as_str();
+                    match self.executor.git_diff(path).await {
+                        Ok(output) => output,
+                        Err(e) => format!("Error running git diff: {e}"),
+                    }
+                }
+                "git_commit" => {
+                    let message = call.args["message"].as_str().unwrap_or("rune update");
+                    match self.executor.git_commit(message).await {
+                        Ok(output) => output,
+                        Err(e) => format!("Error running git commit: {e}"),
+                    }
+                }
+                "undo_git_checkpoint" => {
+                    match self.executor.undo_git_checkpoint().await {
+                        Ok(output) => output,
+                        Err(e) => format!("Error undoing git checkpoint: {e}"),
+                    }
+                }
                 "execute_commands" => {
                     let cmd = call.args["cmd"].as_str().unwrap_or("");
                     match self.executor.execute_commands(cmd).await {
@@ -304,8 +334,15 @@ impl Agent {
     }
 
     fn is_destructive_tool(&self, call: &FunctionCall) -> bool {
-        let is_destructive = matches!(call.name.as_str(), "write_file" | "patch_file" | "execute_commands" | "execute_batch");
+        let is_destructive = matches!(
+            call.name.as_str(), 
+            "write_file" | "patch_file" | "execute_commands" | "execute_batch" | "git_commit" | "undo_git_checkpoint"
+        );
         is_destructive
+    }
+
+    fn is_read_only_tool(&self, call: &FunctionCall) -> bool {
+        matches!(call.name.as_str(), "list_files" | "read_file" | "search_code" | "git_status" | "git_diff")
     }
 
     pub async fn run(&mut self, raw_prompt: &str, auto_approve: bool) {
@@ -424,8 +461,80 @@ impl Agent {
             }
 
             let mut response_parts = Vec::new();
-            for (call, _) in tool_calls {
-                println!("\n[Executing tool: {}]", call.name);
+            
+            let mut read_only_calls = Vec::new();
+            let mut mutating_calls = Vec::new();
+
+            for (call, sig) in tool_calls {
+                if self.is_read_only_tool(&call) {
+                    read_only_calls.push((call, sig));
+                } else {
+                    mutating_calls.push((call, sig));
+                }
+            }
+
+            if !read_only_calls.is_empty() {
+                let executor = &self.executor;
+                let futures = read_only_calls.into_iter().map(|(call, _sig)| {
+                    async move {
+                        println!("\n[Executing read-only tool concurrently: {}]", call.name);
+                        let output = match call.name.as_str() {
+                            "list_files" => {
+                                let path = call.args["path"].as_str().unwrap_or(".");
+                                match executor.list_files(Path::new(path)).await {
+                                    Ok(files) => files,
+                                    Err(e) => format!("Error listing files: {e}"),
+                                }
+                            }
+                            "read_file" => {
+                                let path = call.args["path"].as_str().unwrap_or("");
+                                match executor.read_file(Path::new(path)).await {
+                                    Ok(content) => content,
+                                    Err(e) => format!("Error reading file: {e}"),
+                                }
+                            }
+                            "search_code" => {
+                                let query = call.args["query"].as_str().unwrap_or("");
+                                match executor.search_code(query).await {
+                                    Ok(output) => output,
+                                    Err(e) => format!("Error executing cix search: {e}"),
+                                }
+                            }
+                            "git_status" => {
+                                match executor.git_status().await {
+                                    Ok(output) => output,
+                                    Err(e) => format!("Error running git status: {e}"),
+                                }
+                            }
+                            "git_diff" => {
+                                let path = call.args["path"].as_str();
+                                match executor.git_diff(path).await {
+                                    Ok(output) => output,
+                                    Err(e) => format!("Error running git diff: {e}"),
+                                }
+                            }
+                            _ => format!("Error: Unknown read-only tool '{}'", call.name),
+                        };
+                        (call.name, output)
+                    }
+                });
+
+                let results = futures_util::future::join_all(futures).await;
+                for (name, output) in results {
+                    response_parts.push(GeminiPart {
+                        text: None,
+                        function_call: None,
+                        function_response: Some(FunctionResponse {
+                            name,
+                            response: serde_json::json!({ "result": output }),
+                        }),
+                        thought_signature: None,
+                    });
+                }
+            }
+
+            for (call, _) in mutating_calls {
+                println!("\n[Executing tool sequentially: {}]", call.name);
                 let output = self.execute_tool(&call, auto_approve).await;
 
                 response_parts.push(GeminiPart {
@@ -486,6 +595,8 @@ async fn confirm_execution(call: &FunctionCall) -> bool {
     task::spawn_blocking(move || -> bool {
         println!("\n The agent wants to execute a potentially destructive tool execution:");
         println!("   Function : {}", call.name);
+        if call.name == "execute_commands" || call.name == "execute_batch"{ 
+        println!("   Args     : {}", call.args);}
         println!("   Allow execution? [y/N]: ");
         
         let _ = io::stdout().flush();
@@ -585,6 +696,52 @@ pub fn get_tool_declarations() -> Vec<Tool> {
                         }
                     },
                     "required": ["query"]
+                }),
+            },
+            FunctionDeclaration {
+                name: "git_status".to_string(),
+                description: "Check the current git status of the repository.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "OBJECT",
+                    "properties": {},
+                    "required": []
+                }),
+            },
+            FunctionDeclaration {
+                name: "git_diff".to_string(),
+                description: "Show changes between the working tree and index or a commit, optionally for a specific file path.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "OBJECT",
+                    "properties": {
+                        "path": {
+                            "type": "STRING",
+                            "description": "Optional file path to diff"
+                        }
+                    },
+                    "required": []
+                }),
+            },
+            FunctionDeclaration {
+                name: "git_commit".to_string(),
+                description: "Stage all changes and create a git commit with a message.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "OBJECT",
+                    "properties": {
+                        "message": {
+                            "type": "STRING",
+                            "description": "Commit message"
+                        }
+                    },
+                    "required": ["message"]
+                }),
+            },
+            FunctionDeclaration {
+                name: "undo_git_checkpoint".to_string(),
+                description: "Undo the last file mutation made by the agent by popping the git stash checkpoint.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "OBJECT",
+                    "properties": {},
+                    "required": []
                 }),
             },
             FunctionDeclaration {
