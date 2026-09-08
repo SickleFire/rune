@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
 use std::io;
+use similar::{ChangeTag, TextDiff};
+use colored::*;
 
 pub struct ToolExecutor {
     workspace_root: PathBuf,
@@ -99,6 +101,21 @@ impl ToolExecutor {
 
     pub async fn write_file(&self, path: &Path, content: &str) -> Result<String, std::io::Error> {
         let safe_path = self.sanitize_path(path)?;
+        
+        let old_content = tokio::fs::read_to_string(&safe_path).await.unwrap_or_default();
+        
+        println!("\n{}: {}", "PREVIEW CHANGES FOR".bold().cyan(), path.display().to_string().yellow());
+        let diff = TextDiff::from_lines(old_content.as_str(), content);
+        for change in diff.iter_all_changes() {
+            let (sign, line_str) = match change.tag() {
+                ChangeTag::Delete => ("- ", format!("{}", change).red()),
+                ChangeTag::Insert => ("+ ", format!("{}", change).green()),
+                ChangeTag::Equal => ("  ", format!("{}", change).normal()),
+            };
+            print!("{}{}", sign.dimmed(), line_str);
+        }
+        println!();
+
         if let Some(parent) = safe_path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
