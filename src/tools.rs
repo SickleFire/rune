@@ -377,8 +377,32 @@ impl ToolExecutor {
     }
 
     pub async fn git_commit(&self, message: &str) -> Result<String, std::io::Error> {
-        let cmd = format!("git add -A && git commit -m \"{}\"", message);
-        self.execute_commands(&cmd).await
+        let canonical_workspace = dunce::canonicalize(&self.workspace_root)?;
+
+        let add_output = Command::new("git")
+            .current_dir(&canonical_workspace)
+            .args(["add", "-A"])
+            .output()
+            .await?;
+
+        if !add_output.status.success() {
+            let stderr = String::from_utf8_lossy(&add_output.stderr);
+            return Ok(format!("git add failed:\n{}", stderr));
+        }
+        
+        let commit_output = Command::new("git")
+            .current_dir(&canonical_workspace)
+            .args(["commit", "-m", message])
+            .output()
+            .await?;
+
+        let stdout = String::from_utf8_lossy(&commit_output.stdout);
+        let stderr = String::from_utf8_lossy(&commit_output.stderr);
+
+        Ok(format!(
+            "Exit Code: {}\nSTDOUT:\n{}\nSTDERR:\n{}",
+            commit_output.status, stdout, stderr
+        ))
     }
 
     async fn create_git_checkpoint(&self, message: &str) {
