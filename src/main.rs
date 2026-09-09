@@ -1,14 +1,14 @@
+use colored::*;
+use rune::api::Agent;
+use rustyline::Context;
+use rustyline::Editor;
+use rustyline::completion::{Completer, Pair};
+use rustyline::error::ReadlineError;
+use rustyline::highlight::Highlighter;
+use rustyline::hint::{Hinter, HistoryHinter};
+use rustyline::validate::Validator;
 use std::env;
 use std::error::Error;
-use rune::api::Agent;
-use rustyline::error::ReadlineError;
-use rustyline::Editor;
-use rustyline::Context;
-use rustyline::completion::{Completer, Pair};
-use rustyline::highlight::Highlighter;
-use rustyline::validate::Validator;
-use rustyline::hint::{Hinter, HistoryHinter};
-use colored::*;
 
 struct RuneHelper {
     hinter: HistoryHinter,
@@ -34,23 +34,11 @@ impl Completer for RuneHelper {
         _ctx: &Context<'_>,
     ) -> rustyline::Result<(usize, Vec<Pair>)> {
         let line_up_to_cursor = &line[..pos];
-        
-        // 1. Complete slash commands if line starts with '/'
+
         if line_up_to_cursor.starts_with('/') {
             let commands = vec![
-                "/help",
-                "/tools",
-                "/context",
-                "/tokens",
-                "/files",
-                "/tree",
-                "/auto",
-                "/model",
-                "/save",
-                "/load",
-                "/clear",
-                "/reset",
-                "/undo",
+                "/help", "/tools", "/context", "/tokens", "/files", "/tree", "/auto", "/model",
+                "/save", "/load", "/clear", "/reset", "/undo",
             ];
 
             let mut pairs = Vec::new();
@@ -65,7 +53,6 @@ impl Completer for RuneHelper {
             return Ok((0, pairs));
         }
 
-        // 2. Complete file paths if typing '@'
         if let Some(at_idx) = line_up_to_cursor.rfind('@') {
             let prefix = &line_up_to_cursor[at_idx + 1..];
             let mut pairs = Vec::new();
@@ -105,7 +92,9 @@ fn collect_file_candidates(dir: &std::path::Path, prefix: &str, pairs: &mut Vec<
         } else if path.is_file() {
             if let Ok(rel_path) = path.strip_prefix(std::env::current_dir().unwrap_or_default()) {
                 let rel_str = rel_path.to_string_lossy().replace('\\', "/");
-                if rel_str.starts_with(prefix) || rel_str.to_lowercase().contains(&prefix.to_lowercase()) {
+                if rel_str.starts_with(prefix)
+                    || rel_str.to_lowercase().contains(&prefix.to_lowercase())
+                {
                     pairs.push(Pair {
                         display: rel_str.clone(),
                         replacement: rel_str,
@@ -120,11 +109,10 @@ fn collect_file_candidates(dir: &std::path::Path, prefix: &str, pairs: &mut Vec<
 async fn main() -> Result<(), Box<dyn Error>> {
     let workspace_root = env::current_dir().expect("Failed to get current directory");
 
-    let api_key = env::var("GEMINI_API_KEY")
-        .expect("Please set the GEMINI_API_KEY environment variable");
+    let api_key =
+        env::var("GEMINI_API_KEY").expect("Please set the GEMINI_API_KEY environment variable");
 
-    let model = env::var("GEMINI_MODEL")
-        .unwrap_or("gemini-3.5-flash-lite".to_string());
+    let model = env::var("GEMINI_MODEL").unwrap_or("gemini-3.5-flash-lite".to_string());
 
     let mut agent = Agent::new(api_key, workspace_root, model);
 
@@ -137,8 +125,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let _ = rl.load_history(&history_file);
 
     println!("{}", "=== Rune Coding Harness ===".cyan().bold());
-    println!("{}", "Type your prompt, or use /help for available commands.".bright_black());
-    println!("{}", "Type 'exit' or 'quit' to end session.\n".bright_black());
+    println!(
+        "{}",
+        "Type your prompt, or use /help for available commands.".bright_black()
+    );
+    println!(
+        "{}",
+        "Type 'exit' or 'quit' to end session.\n".bright_black()
+    );
 
     loop {
         let readline = rl.readline("> ");
@@ -169,7 +163,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     continue;
                 }
 
-                if prompt.eq_ignore_ascii_case("/context") || prompt.eq_ignore_ascii_case("/tokens") {
+                if prompt.eq_ignore_ascii_case("/context") || prompt.eq_ignore_ascii_case("/tokens")
+                {
                     let (msgs, chars) = agent.get_history_stats();
                     println!("{}", format!("Conversation Context: {} messages, ~{} characters (~{} estimated tokens)", msgs, chars, chars / 4).cyan());
                     continue;
@@ -200,7 +195,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         }
                     } else {
                         auto_approve = !auto_approve;
-                        println!("Auto-approve mode is now: {}", if auto_approve { "ENABLED".green() } else { "DISABLED".yellow() });
+                        println!(
+                            "Auto-approve mode is now: {}",
+                            if auto_approve {
+                                "ENABLED".green()
+                            } else {
+                                "DISABLED".yellow()
+                            }
+                        );
                     }
                     continue;
                 }
@@ -209,9 +211,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     let parts: Vec<&str> = prompt.split_whitespace().collect();
                     if parts.len() > 1 {
                         agent.model = parts[1].to_string();
-                        println!("{}", format!("Switched active model to: {}", agent.model).green());
+                        println!(
+                            "{}",
+                            format!("Switched active model to: {}", agent.model).green()
+                        );
                     } else {
-                        println!("{}", format!("Current active model: {}", agent.model).cyan());
+                        println!(
+                            "{}",
+                            format!("Current active model: {}", agent.model).cyan()
+                        );
                         println!("Usage: /model <model_name>");
                     }
                     continue;
@@ -219,9 +227,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                 if prompt.starts_with("/save") {
                     let parts: Vec<&str> = prompt.split_whitespace().collect();
-                    let filename = if parts.len() > 1 { parts[1] } else { "rune_session.json" };
+                    let filename = if parts.len() > 1 {
+                        parts[1]
+                    } else {
+                        "rune_session.json"
+                    };
                     match agent.save_session(std::path::Path::new(filename)) {
-                        Ok(_) => println!("{}", format!("Successfully saved session history to '{}'", filename).green()),
+                        Ok(_) => println!(
+                            "{}",
+                            format!("Successfully saved session history to '{}'", filename).green()
+                        ),
                         Err(e) => eprintln!("{}", format!("Failed to save session: {e}").red()),
                     }
                     continue;
@@ -229,9 +244,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                 if prompt.starts_with("/load") {
                     let parts: Vec<&str> = prompt.split_whitespace().collect();
-                    let filename = if parts.len() > 1 { parts[1] } else { "rune_session.json" };
+                    let filename = if parts.len() > 1 {
+                        parts[1]
+                    } else {
+                        "rune_session.json"
+                    };
                     match agent.load_session(std::path::Path::new(filename)) {
-                        Ok(_) => println!("{}", format!("Successfully loaded session history from '{}'", filename).green()),
+                        Ok(_) => println!(
+                            "{}",
+                            format!("Successfully loaded session history from '{}'", filename)
+                                .green()
+                        ),
                         Err(e) => eprintln!("{}", format!("Failed to load session: {e}").red()),
                     }
                     continue;
@@ -239,31 +262,88 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                 if prompt.eq_ignore_ascii_case("/tools") {
                     println!("{}", "AVAILABLE TOOLS:".cyan().bold());
-                    println!("  - {:<18} : List files and directories in a given path", "list_files".green());
-                    println!("  - {:<18} : Read the full text content of a file", "read_file".green());
-                    println!("  - {:<18} : Write or overwrite content to a file (requires confirmation)", "write_file".green());
-                    println!("  - {:<18} : Surgical search-and-replace patch on a file (requires confirmation)", "patch_file".green());
-                    println!("  - {:<18} : Instant BM25 code search via cix binary", "search_code".green());
-                    println!("  - {:<18} : Run a single shell command (requires confirmation)", "execute_commands".green());
-                    println!("  - {:<18} : Run a batch of sequential shell commands (requires confirmation)", "execute_batch".green());
-                    println!("  - {:<18} : Check the current git status of the repository", "git_status".green());
-                    println!("  - {:<18} : Show changes in working tree or file path", "git_diff".green());
-                    println!("  - {:<18} : Stage all changes and create a git commit (requires confirmation)", "git_commit".green());
-                    println!("  - {:<18} : Undo the last file mutation via git stash checkpoint", "undo_git_checkpoint".green());
+                    println!(
+                        "  - {:<18} : List files and directories in a given path",
+                        "list_files".green()
+                    );
+                    println!(
+                        "  - {:<18} : Read the full text content of a file",
+                        "read_file".green()
+                    );
+                    println!(
+                        "  - {:<18} : Write or overwrite content to a file (requires confirmation)",
+                        "write_file".green()
+                    );
+                    println!(
+                        "  - {:<18} : Surgical search-and-replace patch on a file (requires confirmation)",
+                        "patch_file".green()
+                    );
+                    println!(
+                        "  - {:<18} : Instant BM25 code search via cix binary",
+                        "search_code".green()
+                    );
+                    println!(
+                        "  - {:<18} : Run a single shell command (requires confirmation)",
+                        "execute_commands".green()
+                    );
+                    println!(
+                        "  - {:<18} : Run a batch of sequential shell commands (requires confirmation)",
+                        "execute_batch".green()
+                    );
+                    println!(
+                        "  - {:<18} : Check the current git status of the repository",
+                        "git_status".green()
+                    );
+                    println!(
+                        "  - {:<18} : Show changes in working tree or file path",
+                        "git_diff".green()
+                    );
+                    println!(
+                        "  - {:<18} : Stage all changes and create a git commit (requires confirmation)",
+                        "git_commit".green()
+                    );
+                    println!(
+                        "  - {:<18} : Undo the last file mutation via git stash checkpoint",
+                        "undo_git_checkpoint".green()
+                    );
                     continue;
                 }
 
                 if prompt.eq_ignore_ascii_case("/help") {
                     println!("{}", "AVAILABLE COMMANDS:".cyan().bold());
                     println!("  - {:<22} : Show this help message", "/help".green());
-                    println!("  - {:<22} : List available tools the agent can use", "/tools".green());
-                    println!("  - {:<22} : Show conversation context stats (tokens/chars)", "/context".green());
-                    println!("  - {:<22} : Print the repository file tree", "/files".green());
-                    println!("  - {:<22} : Toggle or set auto-approve mode (/auto on|off)", "/auto".green());
-                    println!("  - {:<22} : View or switch Gemini model (/model [name])", "/model".green());
-                    println!("  - {:<22} : Save session history to JSON file", "/save [file]".green());
-                    println!("  - {:<22} : Load session history from JSON file", "/load [file]".green());
-                    println!("  - {:<22} : Clear the conversation history", "/clear or /reset".green());
+                    println!(
+                        "  - {:<22} : List available tools the agent can use",
+                        "/tools".green()
+                    );
+                    println!(
+                        "  - {:<22} : Show conversation context stats (tokens/chars)",
+                        "/context".green()
+                    );
+                    println!(
+                        "  - {:<22} : Print the repository file tree",
+                        "/files".green()
+                    );
+                    println!(
+                        "  - {:<22} : Toggle or set auto-approve mode (/auto on|off)",
+                        "/auto".green()
+                    );
+                    println!(
+                        "  - {:<22} : View or switch Gemini model (/model [name])",
+                        "/model".green()
+                    );
+                    println!(
+                        "  - {:<22} : Save session history to JSON file",
+                        "/save [file]".green()
+                    );
+                    println!(
+                        "  - {:<22} : Load session history from JSON file",
+                        "/load [file]".green()
+                    );
+                    println!(
+                        "  - {:<22} : Clear the conversation history",
+                        "/clear or /reset".green()
+                    );
                     println!("  - {:<22} : Exit the application", "exit or quit".green());
                     continue;
                 }

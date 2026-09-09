@@ -1,12 +1,11 @@
 use crate::tools::ToolExecutor;
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::eprintln;
+use std::io::Write as StdWrite;
 use std::path::Path;
 use std::path::PathBuf;
 use std::println;
-use futures_util::StreamExt;
-use tokio::io;
-use tokio::io::AsyncWriteExt;
 use tokio::task;
 
 #[derive(Serialize)]
@@ -109,7 +108,9 @@ impl Agent {
 
     pub fn get_history_stats(&self) -> (usize, usize) {
         let message_count = self.history.len();
-        let total_chars: usize = self.history.iter()
+        let total_chars: usize = self
+            .history
+            .iter()
             .flat_map(|c| &c.parts)
             .filter_map(|p| p.text.as_deref())
             .map(|t| t.len())
@@ -151,7 +152,10 @@ impl Agent {
         self.history.push(GeminiContent {
             role: Some("user".to_string()),
             parts: vec![GeminiPart {
-                text: Some(format!("[SYSTEM ARCHITECTURE INITIALIZATION]\n{}", system_prompt)),
+                text: Some(format!(
+                    "[SYSTEM ARCHITECTURE INITIALIZATION]\n{}",
+                    system_prompt
+                )),
                 function_call: None,
                 function_response: None,
                 thought_signature: None,
@@ -191,7 +195,10 @@ impl Agent {
             .filter(|e| {
                 let name = e.file_name();
                 let name_str = name.to_string_lossy();
-                name_str != "target" && name_str != ".git" && name_str != ".DS_Store" && !name_str.ends_with(".rs.bk")
+                name_str != "target"
+                    && name_str != ".git"
+                    && name_str != ".DS_Store"
+                    && !name_str.ends_with(".rs.bk")
             })
             .collect();
 
@@ -227,7 +234,11 @@ impl Agent {
             let search = call.args["search"].as_str().unwrap_or("");
             let replace = call.args["replace"].as_str().unwrap_or("");
 
-            match self.executor.preview_patch(Path::new(path), search, replace).await {
+            match self
+                .executor
+                .preview_patch(Path::new(path), search, replace)
+                .await
+            {
                 Ok((safe_path, new_content)) => {
                     let search_len = search.len();
                     let replace_len = replace.len();
@@ -235,12 +246,33 @@ impl Agent {
                         println!("\n[Execution cancelled by user for: {}]", call.name);
                         return "Tool execution rejected by user.".to_string();
                     }
-                    match self.executor.apply_patch(&safe_path, &new_content, search_len, replace_len).await {
+                    match self
+                        .executor
+                        .apply_patch(&safe_path, &new_content, search_len, replace_len)
+                        .await
+                    {
                         Ok(_) => "File Patched Successfully.".to_string(),
                         Err(e) => format!("Error applying patch: {e}"),
                     }
                 }
                 Err(e) => format!("Error previewing patch: {e}"),
+            }
+        } else if call.name.as_str() == "write_file" {
+            let path = call.args["path"].as_str().unwrap_or("");
+            let content = call.args["content"].as_str().unwrap_or("");
+
+            match self.executor.preview_write(Path::new(path), content).await {
+                Ok(safe_path) => {
+                    if !auto_approve && !confirm_execution(call).await {
+                        println!("\n[Execution cancelled by user for: {}]", call.name);
+                        return "Tool execution rejected by user.".to_string();
+                    }
+                    match self.executor.apply_write(&safe_path, content).await {
+                        Ok(msg) => msg,
+                        Err(e) => format!("Error writing file: {e}"),
+                    }
+                }
+                Err(e) => format!("Error previewing write: {e}"),
             }
         } else {
             if self.is_destructive_tool(call) {
@@ -265,14 +297,6 @@ impl Agent {
                         Err(e) => format!("Error reading file: {e}"),
                     }
                 }
-                "write_file" => {
-                    let path = call.args["path"].as_str().unwrap_or("");
-                    let content = call.args["content"].as_str().unwrap_or("");
-                    match self.executor.write_file(Path::new(path), content).await {
-                        Ok(_) => "File Written Successfully.".to_string(),
-                        Err(e) => format!("Error writing file: {e}"),
-                    }
-                }
                 "search_code" => {
                     let query = call.args["query"].as_str().unwrap_or("");
                     match self.executor.search_code(query).await {
@@ -280,12 +304,10 @@ impl Agent {
                         Err(e) => format!("Error executing cix search: {e}"),
                     }
                 }
-                "git_status" => {
-                    match self.executor.git_status().await {
-                        Ok(output) => output,
-                        Err(e) => format!("Error running git status: {e}"),
-                    }
-                }
+                "git_status" => match self.executor.git_status().await {
+                    Ok(output) => output,
+                    Err(e) => format!("Error running git status: {e}"),
+                },
                 "git_diff" => {
                     let path = call.args["path"].as_str();
                     match self.executor.git_diff(path).await {
@@ -300,12 +322,10 @@ impl Agent {
                         Err(e) => format!("Error running git commit: {e}"),
                     }
                 }
-                "undo_git_checkpoint" => {
-                    match self.executor.undo_git_checkpoint().await {
-                        Ok(output) => output,
-                        Err(e) => format!("Error undoing git checkpoint: {e}"),
-                    }
-                }
+                "undo_git_checkpoint" => match self.executor.undo_git_checkpoint().await {
+                    Ok(output) => output,
+                    Err(e) => format!("Error undoing git checkpoint: {e}"),
+                },
                 "execute_commands" => {
                     let cmd = call.args["cmd"].as_str().unwrap_or("");
                     match self.executor.execute_commands(cmd).await {
@@ -316,7 +336,9 @@ impl Agent {
                 "execute_batch" => {
                     let cmds_val = &call.args["commands"];
                     let cmds: Vec<String> = if let Some(arr) = cmds_val.as_array() {
-                        arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect()
                     } else if let Some(s) = cmds_val.as_str() {
                         vec![s.to_string()]
                     } else {
@@ -335,14 +357,22 @@ impl Agent {
 
     fn is_destructive_tool(&self, call: &FunctionCall) -> bool {
         let is_destructive = matches!(
-            call.name.as_str(), 
-            "write_file" | "patch_file" | "execute_commands" | "execute_batch" | "git_commit" | "undo_git_checkpoint"
+            call.name.as_str(),
+            "write_file"
+                | "patch_file"
+                | "execute_commands"
+                | "execute_batch"
+                | "git_commit"
+                | "undo_git_checkpoint"
         );
         is_destructive
     }
 
     fn is_read_only_tool(&self, call: &FunctionCall) -> bool {
-        matches!(call.name.as_str(), "list_files" | "read_file" | "search_code" | "git_status" | "git_diff")
+        matches!(
+            call.name.as_str(),
+            "list_files" | "read_file" | "search_code" | "git_status" | "git_diff"
+        )
     }
 
     pub async fn run(&mut self, raw_prompt: &str, auto_approve: bool) {
@@ -360,8 +390,7 @@ impl Agent {
 
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:streamGenerateContent?alt=sse&key={}",
-            self.model,
-            self.api_key
+            self.model, self.api_key
         );
 
         loop {
@@ -410,15 +439,19 @@ impl Agent {
                         let json_str = &line["data: ".len()..];
 
                         if let Ok(parsed) = serde_json::from_str::<GeminiResponse>(json_str) {
-                            if let Some(candidate) = parsed.candidates.and_then(|c| c.into_iter().next()) {
+                            if let Some(candidate) =
+                                parsed.candidates.and_then(|c| c.into_iter().next())
+                            {
                                 for part in candidate.content.parts {
                                     if let Some(t) = &part.text {
                                         print!("{t}");
-                                        let _ = io::stdout().flush();
+                                        let _ = std::io::stdout().flush();
                                         accumulated_text.push_str(t);
                                     }
                                     if let Some(call) = part.function_call {
-                                        if !tool_calls.iter().any(|(c, _)| c.name == call.name && c.args == call.args) {
+                                        if !tool_calls.iter().any(|(c, _)| {
+                                            c.name == call.name && c.args == call.args
+                                        }) {
                                             tool_calls.push((call, part.thought_signature));
                                         }
                                     }
@@ -461,7 +494,7 @@ impl Agent {
             }
 
             let mut response_parts = Vec::new();
-            
+
             let mut read_only_calls = Vec::new();
             let mut mutating_calls = Vec::new();
 
@@ -475,48 +508,44 @@ impl Agent {
 
             if !read_only_calls.is_empty() {
                 let executor = &self.executor;
-                let futures = read_only_calls.into_iter().map(|(call, _sig)| {
-                    async move {
-                        println!("\n[Executing read-only tool concurrently: {}]", call.name);
-                        let output = match call.name.as_str() {
-                            "list_files" => {
-                                let path = call.args["path"].as_str().unwrap_or(".");
-                                match executor.list_files(Path::new(path)).await {
-                                    Ok(files) => files,
-                                    Err(e) => format!("Error listing files: {e}"),
-                                }
+                let futures = read_only_calls.into_iter().map(|(call, _sig)| async move {
+                    println!("\n[Executing read-only tool concurrently: {}]", call.name);
+                    let output = match call.name.as_str() {
+                        "list_files" => {
+                            let path = call.args["path"].as_str().unwrap_or(".");
+                            match executor.list_files(Path::new(path)).await {
+                                Ok(files) => files,
+                                Err(e) => format!("Error listing files: {e}"),
                             }
-                            "read_file" => {
-                                let path = call.args["path"].as_str().unwrap_or("");
-                                match executor.read_file(Path::new(path)).await {
-                                    Ok(content) => content,
-                                    Err(e) => format!("Error reading file: {e}"),
-                                }
+                        }
+                        "read_file" => {
+                            let path = call.args["path"].as_str().unwrap_or("");
+                            match executor.read_file(Path::new(path)).await {
+                                Ok(content) => content,
+                                Err(e) => format!("Error reading file: {e}"),
                             }
-                            "search_code" => {
-                                let query = call.args["query"].as_str().unwrap_or("");
-                                match executor.search_code(query).await {
-                                    Ok(output) => output,
-                                    Err(e) => format!("Error executing cix search: {e}"),
-                                }
+                        }
+                        "search_code" => {
+                            let query = call.args["query"].as_str().unwrap_or("");
+                            match executor.search_code(query).await {
+                                Ok(output) => output,
+                                Err(e) => format!("Error executing cix search: {e}"),
                             }
-                            "git_status" => {
-                                match executor.git_status().await {
-                                    Ok(output) => output,
-                                    Err(e) => format!("Error running git status: {e}"),
-                                }
+                        }
+                        "git_status" => match executor.git_status().await {
+                            Ok(output) => output,
+                            Err(e) => format!("Error running git status: {e}"),
+                        },
+                        "git_diff" => {
+                            let path = call.args["path"].as_str();
+                            match executor.git_diff(path).await {
+                                Ok(output) => output,
+                                Err(e) => format!("Error running git diff: {e}"),
                             }
-                            "git_diff" => {
-                                let path = call.args["path"].as_str();
-                                match executor.git_diff(path).await {
-                                    Ok(output) => output,
-                                    Err(e) => format!("Error running git diff: {e}"),
-                                }
-                            }
-                            _ => format!("Error: Unknown read-only tool '{}'", call.name),
-                        };
-                        (call.name, output)
-                    }
+                        }
+                        _ => format!("Error: Unknown read-only tool '{}'", call.name),
+                    };
+                    (call.name, output)
                 });
 
                 let results = futures_util::future::join_all(futures).await;
@@ -563,12 +592,17 @@ impl Agent {
         for word in words {
             if word.starts_with('@') && word.len() > 1 {
                 let file_path_str = &word[1..];
-                let clean_path = file_path_str.trim_matches(|c: char| !c.is_alphanumeric() && c != '/' && c != '.' && c != '-' && c != '_');
-                
+                let clean_path = file_path_str.trim_matches(|c: char| {
+                    !c.is_alphanumeric() && c != '/' && c != '.' && c != '-' && c != '_'
+                });
+
                 if !clean_path.is_empty() {
                     match self.executor.read_file(Path::new(clean_path)).await {
                         Ok(content) => {
-                            injected_files.push(format!("\n\n[Auto-injected content of @{}]:\n```\n{}\n```", clean_path, content));
+                            injected_files.push(format!(
+                                "\n\n[Auto-injected content of @{}]:\n```\n{}\n```",
+                                clean_path, content
+                            ));
                             println!("[Rune: Auto-scraped @{} into context]", clean_path);
                         }
                         Err(e) => {
@@ -591,16 +625,17 @@ impl Agent {
 
 async fn confirm_execution(call: &FunctionCall) -> bool {
     let call = call.clone();
-    
+
     task::spawn_blocking(move || -> bool {
         println!("\n The agent wants to execute a potentially destructive tool execution:");
         println!("   Function : {}", call.name);
-        if call.name == "execute_commands" || call.name == "execute_batch"{ 
-        println!("   Args     : {}", call.args);}
+        if call.name == "execute_commands" || call.name == "execute_batch" {
+            println!("   Args     : {}", call.args);
+        }
         println!("   Allow execution? [y/N]: ");
-        
-        let _ = io::stdout().flush();
-    
+
+        let _ = std::io::stdout().flush();
+
         let mut input = String::new();
         if std::io::stdin().read_line(&mut input).is_ok() {
             let trimmed = input.trim().to_lowercase();
@@ -780,3 +815,4 @@ pub fn get_tool_declarations() -> Vec<Tool> {
 
     tools
 }
+
