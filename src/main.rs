@@ -27,7 +27,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("{}", "Type 'exit' or 'quit' to end session.\n".bright_black());
 
     loop {
-        let readline = rl.readline(&format!("{}", "> ".cyan().bold()));
+        let readline = rl.readline("> ");
         match readline {
             Ok(line) => {
                 let prompt = line.trim();
