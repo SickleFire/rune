@@ -1,11 +1,14 @@
+use crate::tools::AgentTool;
 use crate::tools::ToolExecutor;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::eprintln;
 use std::io::Write as StdWrite;
 use std::path::Path;
 use std::path::PathBuf;
 use std::println;
+use std::sync::Arc;
 use tokio::task;
 
 #[derive(Serialize)]
@@ -80,6 +83,7 @@ pub struct Agent {
     history: Vec<GeminiContent>,
     executor: ToolExecutor,
     tools: Vec<Tool>,
+    dynamic_tools: HashMap<String, Arc<dyn AgentTool>>,
     workspace_root: PathBuf,
 }
 
@@ -92,10 +96,29 @@ impl Agent {
             history: Vec::new(),
             executor: ToolExecutor::new(workspace_root.clone()),
             tools: get_tool_declarations(),
+            dynamic_tools: HashMap::new(),
             workspace_root,
         };
+
         agent.initialize_system_context();
         agent
+    }
+
+    /// Builder method to dynamically attach any tool module
+    pub fn with_tool(mut self, tool: Arc<dyn AgentTool>) -> Self {
+        let decl = tool.declaration();
+
+        self.dynamic_tools.insert(decl.name.clone(), tool);
+
+        if self.tools.is_empty() {
+            self.tools.push(Tool {
+                function_declarations: vec![decl],
+            });
+        } else {
+            self.tools[0].function_declarations.push(decl);
+        }
+
+        self
     }
 
     pub fn get_workspace_root(&self) -> &PathBuf {
@@ -229,6 +252,16 @@ impl Agent {
     }
 
     async fn execute_tool(&self, call: &FunctionCall, auto_approve: bool) -> String {
+        if let Some(dynamic_tool) = self.dynamic_tools.get(&call.name) {
+            if dynamic_tool.is_destructive() {
+                if !auto_approve && !confirm_execution(call).await {
+                    println!("\n[Execution cancelled by user for: {}]", call.name);
+                    return "Tool execution rejected by user.".to_string();
+                }
+            }
+            return dynamic_tool.execute(call.args.clone()).await;
+        }
+
         if call.name.as_str() == "patch_file" {
             let path = call.args["path"].as_str().unwrap_or("");
             let search = call.args["search"].as_str().unwrap_or("");
@@ -356,6 +389,10 @@ impl Agent {
     }
 
     fn is_destructive_tool(&self, call: &FunctionCall) -> bool {
+        if let Some(tool) = self.dynamic_tools.get(&call.name) {
+            return tool.is_destructive();
+        }
+
         let is_destructive = matches!(
             call.name.as_str(),
             "write_file"
@@ -369,6 +406,10 @@ impl Agent {
     }
 
     fn is_read_only_tool(&self, call: &FunctionCall) -> bool {
+        if let Some(tool) = self.dynamic_tools.get(&call.name) {
+            return !tool.is_destructive();
+        }
+
         matches!(
             call.name.as_str(),
             "list_files" | "read_file" | "search_code" | "git_status" | "git_diff"
@@ -508,44 +549,62 @@ impl Agent {
 
             if !read_only_calls.is_empty() {
                 let executor = &self.executor;
-                let futures = read_only_calls.into_iter().map(|(call, _sig)| async move {
-                    println!("\n[Executing read-only tool concurrently: {}]", call.name);
-                    let output = match call.name.as_str() {
-                        "list_files" => {
-                            let path = call.args["path"].as_str().unwrap_or(".");
-                            match executor.list_files(Path::new(path)).await {
-                                Ok(files) => files,
-                                Err(e) => format!("Error listing files: {e}"),
-                            }
+                let ro_dynamic: HashMap<String, Arc<dyn AgentTool>> = read_only_calls
+                    .iter()
+                    .filter_map(|(call, _)| {
+                        self.dynamic_tools
+                            .get(&call.name)
+                            .map(|t| (call.name.clone(), Arc::clone(t)))
+                    })
+                    .collect();
+
+                let futures = read_only_calls.into_iter().map(|(call, _sig)| {
+                    let ro_dynamic = ro_dynamic.clone();
+                    async move {
+                        println!("\n[Executing read-only tool concurrently: {}]", call.name);
+
+                        if let Some(tool) = ro_dynamic.get(&call.name) {
+                            let output = tool.execute(call.args.clone()).await;
+                            return (call.name, output);
                         }
-                        "read_file" => {
-                            let path = call.args["path"].as_str().unwrap_or("");
-                            match executor.read_file(Path::new(path)).await {
-                                Ok(content) => content,
-                                Err(e) => format!("Error reading file: {e}"),
+
+                        let output = match call.name.as_str() {
+                            "list_files" => {
+                                let path = call.args["path"].as_str().unwrap_or(".");
+                                match executor.list_files(Path::new(path)).await {
+                                    Ok(files) => files,
+                                    Err(e) => format!("Error listing files: {e}"),
+                                }
                             }
-                        }
-                        "search_code" => {
-                            let query = call.args["query"].as_str().unwrap_or("");
-                            match executor.search_code(query).await {
+                            "read_file" => {
+                                let path = call.args["path"].as_str().unwrap_or("");
+                                match executor.read_file(Path::new(path)).await {
+                                    Ok(content) => content,
+                                    Err(e) => format!("Error reading file: {e}"),
+                                }
+                            }
+                            "search_code" => {
+                                let query = call.args["query"].as_str().unwrap_or("");
+                                match executor.search_code(query).await {
+                                    Ok(output) => output,
+                                    Err(e) => format!("Error executing cix search: {e}"),
+                                }
+                            }
+                            "git_status" => match executor.git_status().await {
                                 Ok(output) => output,
-                                Err(e) => format!("Error executing cix search: {e}"),
+                                Err(e) => format!("Error running git status: {e}"),
+                            },
+                            "git_diff" => {
+                                let path = call.args["path"].as_str();
+                                match executor.git_diff(path).await {
+                                    Ok(output) => output,
+                                    Err(e) => format!("Error running git diff: {e}"),
+                                }
                             }
-                        }
-                        "git_status" => match executor.git_status().await {
-                            Ok(output) => output,
-                            Err(e) => format!("Error running git status: {e}"),
-                        },
-                        "git_diff" => {
-                            let path = call.args["path"].as_str();
-                            match executor.git_diff(path).await {
-                                Ok(output) => output,
-                                Err(e) => format!("Error running git diff: {e}"),
-                            }
-                        }
-                        _ => format!("Error: Unknown read-only tool '{}'", call.name),
-                    };
-                    (call.name, output)
+                            _ => format!("Error: Unknown read-only tool '{}'", call.name),
+                        };
+                        (call.name, output)
+                    }
                 });
 
                 let results = futures_util::future::join_all(futures).await;
@@ -815,4 +874,3 @@ pub fn get_tool_declarations() -> Vec<Tool> {
 
     tools
 }
-

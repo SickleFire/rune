@@ -114,7 +114,45 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let model = env::var("GEMINI_MODEL").unwrap_or("gemini-3.5-flash-lite".to_string());
 
+    let args: Vec<String> = env::args().collect();
+    let enable_unity = args.contains(&"--unity".to_string());
+
     let mut agent = Agent::new(api_key, workspace_root, model);
+
+    if enable_unity {
+        println!("{}", "Unity Bridge Integration Enabled.".cyan());
+        agent = agent
+            .with_tool(std::sync::Arc::new(
+                rune::unity_tools::UnityInspectSceneTool::new(),
+            ))
+            .with_tool(std::sync::Arc::new(
+                rune::unity_tools::UnitySetPropertyTool::new(),
+            ))
+            .with_tool(std::sync::Arc::new(
+                rune::unity_tools::UnityInspectComponentsTool::new(),
+            ))
+            .with_tool(std::sync::Arc::new(
+                rune::unity_tools::UnityAssignReferenceTool::new(),
+            ))
+            .with_tool(std::sync::Arc::new(
+                rune::unity_tools::UnityValidateReferencesTool::new(),
+            ))
+            .with_tool(std::sync::Arc::new(
+                rune::unity_tools::UnityAddComponentTool::new(),
+            ))
+            .with_tool(std::sync::Arc::new(
+                rune::unity_tools::UnityFindAssetsTool::new(),
+            ))
+            .with_tool(std::sync::Arc::new(
+                rune::unity_tools::UnityInstantiatePrefabTool::new(),
+            ))
+            .with_tool(std::sync::Arc::new(
+                rune::unity_tools::UnityRefreshAssetDatabaseTool::new(),
+            ))
+            .with_tool(std::sync::Arc::new(
+                rune::unity_tools::UnityReadConsoleLogsTool::new(),
+            ))
+    }
 
     let mut auto_approve = false;
     let mut rl = Editor::new()?;

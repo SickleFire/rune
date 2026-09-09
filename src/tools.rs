@@ -4,6 +4,20 @@ use std::io;
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
 
+use crate::api::FunctionDeclaration;
+use async_trait::async_trait;
+use serde_json::Value;
+
+#[async_trait]
+pub trait AgentTool: Send + Sync {
+    fn declaration(&self) -> FunctionDeclaration;
+    fn is_read_only(&self) -> bool;
+    fn is_destructive(&self) -> bool {
+        false
+    }
+    async fn execute(&self, args: Value) -> String;
+}
+
 pub struct ToolExecutor {
     workspace_root: PathBuf,
 }
