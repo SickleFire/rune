@@ -2,8 +2,119 @@ use std::env;
 use std::error::Error;
 use rune::api::Agent;
 use rustyline::error::ReadlineError;
-use rustyline::DefaultEditor;
+use rustyline::Editor;
+use rustyline::Context;
+use rustyline::completion::{Completer, Pair};
+use rustyline::highlight::Highlighter;
+use rustyline::validate::Validator;
+use rustyline::hint::{Hinter, HistoryHinter};
 use colored::*;
+
+struct RuneHelper {
+    hinter: HistoryHinter,
+}
+
+impl Hinter for RuneHelper {
+    type Hint = String;
+    fn hint(&self, line: &str, pos: usize, ctx: &Context<'_>) -> Option<String> {
+        self.hinter.hint(line, pos, ctx)
+    }
+}
+
+impl Highlighter for RuneHelper {}
+impl Validator for RuneHelper {}
+
+impl Completer for RuneHelper {
+    type Candidate = Pair;
+
+    fn complete(
+        &self,
+        line: &str,
+        pos: usize,
+        _ctx: &Context<'_>,
+    ) -> rustyline::Result<(usize, Vec<Pair>)> {
+        let line_up_to_cursor = &line[..pos];
+        
+        // 1. Complete slash commands if line starts with '/'
+        if line_up_to_cursor.starts_with('/') {
+            let commands = vec![
+                "/help",
+                "/tools",
+                "/context",
+                "/tokens",
+                "/files",
+                "/tree",
+                "/auto",
+                "/model",
+                "/save",
+                "/load",
+                "/clear",
+                "/reset",
+                "/undo",
+            ];
+
+            let mut pairs = Vec::new();
+            for cmd in commands {
+                if cmd.starts_with(line_up_to_cursor) {
+                    pairs.push(Pair {
+                        display: cmd.to_string(),
+                        replacement: cmd.to_string(),
+                    });
+                }
+            }
+            return Ok((0, pairs));
+        }
+
+        // 2. Complete file paths if typing '@'
+        if let Some(at_idx) = line_up_to_cursor.rfind('@') {
+            let prefix = &line_up_to_cursor[at_idx + 1..];
+            let mut pairs = Vec::new();
+
+            if let Ok(workspace) = std::env::current_dir() {
+                collect_file_candidates(&workspace, prefix, &mut pairs);
+            }
+
+            return Ok((at_idx + 1, pairs));
+        }
+
+        Ok((0, Vec::new()))
+    }
+}
+
+impl rustyline::Helper for RuneHelper {}
+
+fn collect_file_candidates(dir: &std::path::Path, prefix: &str, pairs: &mut Vec<Pair>) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    let ignore_dirs = [".git", "target", ".cargo", "node_modules"];
+
+    for entry in entries.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+
+        if ignore_dirs.contains(&name_str.as_ref()) {
+            continue;
+        }
+
+        if path.is_dir() {
+            collect_file_candidates(&path, prefix, pairs);
+        } else if path.is_file() {
+            if let Ok(rel_path) = path.strip_prefix(std::env::current_dir().unwrap_or_default()) {
+                let rel_str = rel_path.to_string_lossy().replace('\\', "/");
+                if rel_str.starts_with(prefix) || rel_str.to_lowercase().contains(&prefix.to_lowercase()) {
+                    pairs.push(Pair {
+                        display: rel_str.clone(),
+                        replacement: rel_str,
+                    });
+                }
+            }
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -18,7 +129,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut agent = Agent::new(api_key, workspace_root, model);
 
     let mut auto_approve = false;
-    let mut rl = DefaultEditor::new()?;
+    let mut rl = Editor::new()?;
+    rl.set_helper(Some(RuneHelper {
+        hinter: HistoryHinter::new(),
+    }));
     let history_file = env::temp_dir().join(".rune_history");
     let _ = rl.load_history(&history_file);
 
