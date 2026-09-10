@@ -116,11 +116,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let args: Vec<String> = env::args().collect();
     let enable_unity = args.contains(&"--unity".to_string());
+    let enable_web = args.contains(&"--web".to_string());
 
     let mut agent = Agent::new(api_key, workspace_root, model);
 
     if enable_unity {
-        println!("{}", "Unity Bridge Integration Enabled.".cyan());
+        println!("{}", "Unity editor tools enabled.".cyan());
         agent = agent
             .with_tool(std::sync::Arc::new(
                 rune::unity_tools::UnityInspectSceneTool::new(),
@@ -151,6 +152,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
             ))
             .with_tool(std::sync::Arc::new(
                 rune::unity_tools::UnityReadConsoleLogsTool::new(),
+            ))
+    }
+
+    if enable_web {
+        println!("{}", "Web utility tools enabled.".cyan());
+        agent = agent
+            .with_tool(std::sync::Arc::new(
+                rune::web_tools::HttpRequestTool::new(),
+            ))
+            .with_tool(std::sync::Arc::new(
+                rune::web_tools::FetchWebPageTool::new(),
+            ))
+            .with_tool(std::sync::Arc::new(
+                rune::web_tools::CheckTcpPortTool::new(),
             ))
     }
 
