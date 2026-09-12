@@ -24,6 +24,8 @@ pub struct CanonicalToolCall {
     pub id: String,
     pub name: String,
     pub args: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thought_signature: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -164,7 +166,7 @@ impl GeminiProvider {
                                 args: tc.args.clone(),
                             }),
                             function_response: None,
-                            thought_signature: None,
+                            thought_signature: tc.thought_signature.clone(),
                         });
                     }
                     out.push(GeminiContent {
@@ -264,15 +266,12 @@ impl LLMProvider for GeminiProvider {
                                     text_buf.push_str(t);
                                 }
                                 if let Some(call) = part.function_call {
-                                    // Gemini can duplicate calls across stream chunks; deduplicate.
-                                    if !tool_calls
-                                        .iter()
-                                        .any(|tc| tc.name == call.name && tc.args == call.args)
-                                    {
+                                    if !tool_calls.iter().any(|tc| tc.name == call.name && tc.args == call.args) {
                                         tool_calls.push(CanonicalToolCall {
                                             id: format!("{}_{}", call.name, call_counter),
                                             name: call.name,
                                             args: call.args,
+                                            thought_signature: part.thought_signature.clone(),
                                         });
                                         call_counter += 1;
                                     }
@@ -548,8 +547,8 @@ impl LLMProvider for OpenAIProvider {
             .map(|(id, name, args_str)| CanonicalToolCall {
                 id,
                 name,
-                args: serde_json::from_str(&args_str)
-                    .unwrap_or(serde_json::Value::Object(Default::default())),
+                args: serde_json::from_str(&args_str).unwrap_or(serde_json::Value::Object(Default::default())),
+                thought_signature: None,
             })
             .collect();
 

@@ -478,7 +478,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         "/auto".green()
                     );
                     println!(
-                        "  - {:<22} : View or switch Gemini model (/model [name])",
+                        "  - {:<22} : Switch or view LLM provider (/provider [gemini|openai] [model])",
+                        "/provider".green()
+                    );
+                    println!(
+                        "  - {:<22} : View or switch model (/model [name])",
                         "/model".green()
                     );
                     println!(
