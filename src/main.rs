@@ -37,8 +37,20 @@ impl Completer for RuneHelper {
 
         if line_up_to_cursor.starts_with('/') {
             let commands = vec![
-                "/help", "/tools", "/context", "/tokens", "/files", "/tree", "/auto", "/model",
-                "/save", "/load", "/clear", "/reset", "/undo",
+                "/help",
+                "/tools",
+                "/context",
+                "/tokens",
+                "/files",
+                "/tree",
+                "/auto",
+                "/model",
+                "/save",
+                "/load",
+                "/clear",
+                "/reset",
+                "/undo",
+                "/provider",
             ];
 
             let mut pairs = Vec::new();
@@ -109,16 +121,31 @@ fn collect_file_candidates(dir: &std::path::Path, prefix: &str, pairs: &mut Vec<
 async fn main() -> Result<(), Box<dyn Error>> {
     let workspace_root = env::current_dir().expect("Failed to get current directory");
 
-    let api_key =
-        env::var("GEMINI_API_KEY").expect("Please set the GEMINI_API_KEY environment variable");
+    let gemini_api_key = env::var("GEMINI_API_KEY").unwrap_or_default();
+    let gemini_model = env::var("GEMINI_MODEL").unwrap_or("gemini-3.5-flash-lite".to_string());
 
-    let model = env::var("GEMINI_MODEL").unwrap_or("gemini-3.5-flash-lite".to_string());
+    let openai_api_key = env::var("OPENAI_API_KEY").unwrap_or_default();
+    let openai_model = env::var("OPENAI_MODEL").unwrap_or("gpt-5.6-luna".to_string());
+
+    let mut agent = if !gemini_api_key.is_empty() {
+        Agent::new_gemini(
+            gemini_api_key.clone(),
+            workspace_root.clone(),
+            gemini_model.clone(),
+        )
+    } else if !openai_api_key.is_empty() {
+        Agent::new_openai(
+            openai_api_key.clone(),
+            workspace_root.clone(),
+            openai_model.clone(),
+        )
+    } else {
+        panic!("Please set either GEMINI_API_KEY or OPENAI_API_KEY environment variable.");
+    };
 
     let args: Vec<String> = env::args().collect();
     let enable_unity = args.contains(&"--unity".to_string());
     let enable_web = args.contains(&"--web".to_string());
-
-    let mut agent = Agent::new(api_key, workspace_root, model);
 
     if enable_unity {
         println!("{}", "Unity editor tools enabled.".cyan());
@@ -158,15 +185,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if enable_web {
         println!("{}", "Web utility tools enabled.".cyan());
         agent = agent
-            .with_tool(std::sync::Arc::new(
-                rune::web_tools::HttpRequestTool::new(),
-            ))
-            .with_tool(std::sync::Arc::new(
-                rune::web_tools::FetchWebPageTool::new(),
-            ))
-            .with_tool(std::sync::Arc::new(
-                rune::web_tools::CheckTcpPortTool::new(),
-            ))
+            .with_tool(std::sync::Arc::new(rune::web_tools::HttpRequestTool::new()))
+            .with_tool(std::sync::Arc::new(rune::web_tools::FetchWebPageTool::new()))
+            .with_tool(std::sync::Arc::new(rune::web_tools::CheckTcpPortTool::new()))
     }
 
     let mut auto_approve = false;
@@ -256,6 +277,81 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 "DISABLED".yellow()
                             }
                         );
+                    }
+                    continue;
+                }
+
+                if prompt.starts_with("/provider") {
+                    let parts: Vec<&str> = prompt.split_whitespace().collect();
+                    if parts.len() > 1 {
+                        let provider_name = parts[1].to_lowercase();
+                        match provider_name.as_str() {
+                            "gemini" => {
+                                if gemini_api_key.is_empty() {
+                                    eprintln!(
+                                        "{}",
+                                        "Error: GEMINI_API_KEY environment variable is not set."
+                                            .red()
+                                    );
+                                } else {
+                                    let model = parts
+                                        .get(2)
+                                        .map(|s| s.to_string())
+                                        .unwrap_or_else(|| "gemini-3.5-flash-lit".into());
+                                    let provider =
+                                        std::sync::Arc::new(rune::api::GeminiProvider::new(
+                                            gemini_api_key.clone(),
+                                            agent.model.clone(),
+                                        ));
+                                    agent.set_provider(provider, model.clone());
+                                    println!(
+                                        "{}",
+                                        format!(
+                                            "Switched active provider to: Gemini (model: {})",
+                                            agent.model
+                                        )
+                                        .green()
+                                    );
+                                }
+                            }
+                            "openai" => {
+                                if openai_api_key.is_empty() {
+                                    eprintln!(
+                                        "{}",
+                                        "Error: OPENAI_API_KEY environment variable is not set."
+                                            .red()
+                                    );
+                                } else {
+                                    let model = parts
+                                        .get(2)
+                                        .map(|s| s.to_string())
+                                        .unwrap_or_else(|| "gpt-5.6-luna".into());
+                                    let provider =
+                                        std::sync::Arc::new(rune::api::OpenAIProvider::new(
+                                            openai_api_key.clone(),
+                                            agent.model.clone(),
+                                        ));
+                                    agent.set_provider(provider, model.clone());
+                                    println!(
+                                        "{}",
+                                        format!(
+                                            "Switched active provider to: OpenAI (model: {})",
+                                            agent.model
+                                        )
+                                        .green()
+                                    );
+                                }
+                            }
+                            _ => {
+                                println!("Usage: /provider [gemini|openai]");
+                            }
+                        }
+                    } else {
+                        println!(
+                            "{}",
+                            format!("Current active provider model: {}", agent.model).cyan()
+                        );
+                        println!("Usage: /provider [gemini|openai]");
                     }
                     continue;
                 }

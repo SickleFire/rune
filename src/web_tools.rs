@@ -209,7 +209,9 @@ fn strip_html_tags(html: &str) -> String {
         let c = chars[i];
         if c == '<' {
             in_tag = true;
-            let remaining: String = chars[i..std::cmp::min(i + 10, chars.len())].iter().collect();
+            let remaining: String = chars[i..std::cmp::min(i + 10, chars.len())]
+                .iter()
+                .collect();
             let lower = remaining.to_lowercase();
             if lower.starts_with("<script") {
                 in_script = true;
@@ -304,15 +306,24 @@ impl AgentTool for CheckTcpPortTool {
         .await
         {
             Ok(Ok(_stream)) => {
-                let output = format!("Success: TCP port {} on host '{}' is UP and LISTENING.", port, host);
+                let output = format!(
+                    "Success: TCP port {} on host '{}' is UP and LISTENING.",
+                    port, host
+                );
                 output
             }
             Ok(Err(e)) => {
-                let output = format!("Closed/Refused: TCP port {} on host '{}' is NOT listening ({e}).", port, host);
+                let output = format!(
+                    "Closed/Refused: TCP port {} on host '{}' is NOT listening ({e}).",
+                    port, host
+                );
                 output
             }
             Err(_) => {
-                let output = format!("Timeout: Connection attempt to TCP port {} on host '{}' timed out after 3 seconds.", port, host);
+                let output = format!(
+                    "Timeout: Connection attempt to TCP port {} on host '{}' timed out after 3 seconds.",
+                    port, host
+                );
                 output
             }
         }
