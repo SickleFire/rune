@@ -723,6 +723,26 @@ impl Agent {
         self.initialize_system_context();
     }
 
+    /// Truncate history to keep the last `max_messages` while preserving
+    /// the initial system architecture context (messages 0 and 1).
+    pub fn truncate_history(&mut self, max_messages: usize) {
+        if self.history.len() <= 2 {
+            return;
+        }
+        // System context is always the first 2 messages (User init + Assistant ACK)
+        let system_len = 2;
+        if self.history.len() > system_len + max_messages {
+            let start = self.history.len() - max_messages;
+            let mut pruned = Vec::with_capacity(system_len + max_messages);
+            // Retain system init context
+            pruned.extend(self.history[..system_len].iter().cloned());
+            // Retain the last `max_messages`
+            pruned.extend(self.history[start..].iter().cloned());
+            self.history = pruned;
+            println!("[Rune: History truncated to last {} messages (+ system context)]", max_messages);
+        }
+    }
+
     pub async fn run(&mut self, raw_prompt: &str, auto_approve: bool) {
         let processed = self.resolve_mentions(raw_prompt).await;
         self.history.push(CanonicalMessage::User(processed));
