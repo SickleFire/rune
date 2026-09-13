@@ -381,13 +381,22 @@ pub struct OpenAIProvider {
 
 impl OpenAIProvider {
     pub fn new(api_key: String, model: String) -> Self {
+        let reasoning_effort = if Self::is_reasoning_model(&model) {
+            Some("none".to_string())
+        } else {
+            None
+        };
         Self {
             client: reqwest::Client::new(),
             api_key,
             model,
             base_url: "https://api.openai.com/v1".into(),
-            reasoning_effort: None,
+            reasoning_effort,
         }
+    }
+
+    fn is_reasoning_model(model: &str) -> bool {
+        model.starts_with("o1") || model.starts_with("o3") || model.starts_with("gpt-5")
     }
 
     pub fn with_reasoning_effort(mut self, effort: impl Into<String>) -> Self {

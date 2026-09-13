@@ -288,57 +288,39 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         match provider_name.as_str() {
                             "gemini" => {
                                 if gemini_api_key.is_empty() {
-                                    eprintln!(
-                                        "{}",
-                                        "Error: GEMINI_API_KEY environment variable is not set."
-                                            .red()
-                                    );
+                                    eprintln!("{}", "Error: GEMINI_API_KEY environment variable is not set.".red());
                                 } else {
                                     let model = parts
                                         .get(2)
                                         .map(|s| s.to_string())
                                         .unwrap_or_else(|| "gemini-3.5-flash-lit".into());
-                                    let provider =
-                                        std::sync::Arc::new(rune::api::GeminiProvider::new(
-                                            gemini_api_key.clone(),
-                                            agent.model.clone(),
-                                        ));
+                                    let provider = std::sync::Arc::new(rune::api::GeminiProvider::new(
+                                        gemini_api_key.clone(),
+                                        model.clone(),
+                                    ));
                                     agent.set_provider(provider, model.clone());
                                     println!(
                                         "{}",
-                                        format!(
-                                            "Switched active provider to: Gemini (model: {})",
-                                            agent.model
-                                        )
-                                        .green()
+                                        format!("Switched active provider to: Gemini (model: {})", agent.model).green()
                                     );
                                 }
                             }
                             "openai" => {
                                 if openai_api_key.is_empty() {
-                                    eprintln!(
-                                        "{}",
-                                        "Error: OPENAI_API_KEY environment variable is not set."
-                                            .red()
-                                    );
+                                    eprintln!("{}", "Error: OPENAI_API_KEY environment variable is not set.".red());
                                 } else {
                                     let model = parts
                                         .get(2)
                                         .map(|s| s.to_string())
                                         .unwrap_or_else(|| "gpt-5.6-luna".into());
-                                    let provider =
-                                        std::sync::Arc::new(rune::api::OpenAIProvider::new(
-                                            openai_api_key.clone(),
-                                            agent.model.clone(),
-                                        ));
+                                    let provider = std::sync::Arc::new(rune::api::OpenAIProvider::new(
+                                        openai_api_key.clone(),
+                                        model.clone(),
+                                    ));
                                     agent.set_provider(provider, model.clone());
                                     println!(
                                         "{}",
-                                        format!(
-                                            "Switched active provider to: OpenAI (model: {})",
-                                            agent.model
-                                        )
-                                        .green()
+                                        format!("Switched active provider to: OpenAI (model: {})", agent.model).green()
                                     );
                                 }
                             }
