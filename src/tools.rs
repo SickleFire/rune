@@ -257,7 +257,44 @@ impl ToolExecutor {
         let cix_result = Command::new("cix")
             .current_dir(&canonical_workspace)
             .arg(query)
-            .arg(&canonical_workspace)
+            .output()
+            .await;
+
+        match cix_result {
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+
+                if !output.status.success() && !stdout.trim().is_empty() {
+                    Ok(format!(
+                        "cix search output:\n{}\nSTDERR:\n{}",
+                        stdout, stderr
+                    ))
+                } else if !output.status.success() {
+                    Ok(format!(
+                        "cix search error (Exit Code {}):\n{}",
+                        output.status, stderr
+                    ))
+                } else {
+                    Ok(stdout.to_string())
+                }
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                Self::fallback_search(&canonical_workspace, query).await
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    //TODOsymbols
+
+    pub async fn search_symbol(&self, query: &str) -> Result<String, std::io::Error> {
+        let canonical_workspace = dunce::canonicalize(&self.workspace_root)?;
+
+        let cix_result = Command::new("cix")
+            .current_dir(&canonical_workspace)
+            .arg("--symbols")
+            .arg(&query)
             .output()
             .await;
 

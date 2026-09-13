@@ -655,6 +655,7 @@ impl Agent {
             - You have global awareness of the repository architecture from the file tree above.\n\
             - When the user mentions specific files using `@filename` (e.g. `@src/api.rs`), those files are automatically loaded and injected into your prompt context.\n\
             - Use `search_code` (powered by the `cix` indexed search engine) to instantly search for functions, symbols, or patterns across the repository when you need to locate code.\n\
+            - Use `search_symbol (powered by the `cix` indexed search engine)to get a symbol of a file. \n\
             - Use `read_file`, `list_files`, `write_file`, `patch_file`, `execute_commands`, and `execute_batch` as needed to inspect and modify code.\n\
             - Prefer `patch_file` over `write_file` for surgical code edits using search and replace blocks.\n\
             - Be concise, precise, and proactive."
@@ -826,6 +827,13 @@ impl Agent {
                                         .await
                                         .unwrap_or_else(|e| e.to_string())
                                 }
+                                "search_symbol" => {
+                                    let q = tc.args["query"].as_str().unwrap_or("");
+                                    executor
+                                        .search_symbol(q)
+                                        .await
+                                        .unwrap_or_else(|e| e.to_string())
+                                }
                                 "git_status" => executor
                                     .git_status()
                                     .await
@@ -871,7 +879,7 @@ impl Agent {
         }
         matches!(
             name,
-            "list_files" | "read_file" | "search_code" | "git_status" | "git_diff"
+            "list_files" | "read_file" | "search_code" | "git_status" | "git_diff" | "search_symbol"
         )
     }
 
@@ -1085,6 +1093,19 @@ pub fn get_tool_declarations() -> Vec<FunctionDeclaration> {
                 "required": ["query"]
             }),
         },
+
+        FunctionDeclaration {
+            name: "search_symbol".into(),
+            description:
+                "Get the symbols of a file via the cix indexed engine"
+                    .into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": { "query": { "type": "string", "description": "<FILE> to request symbols of" } },
+                "required": ["query"]
+            }),
+        },
+
         FunctionDeclaration {
             name: "git_status".into(),
             description: "Check the current git status of the repository.".into(),
