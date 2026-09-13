@@ -3,6 +3,7 @@ use similar::{ChangeTag, TextDiff};
 use std::io;
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
+use tokio::sync::Mutex;
 
 use crate::api::FunctionDeclaration;
 use async_trait::async_trait;
@@ -20,11 +21,12 @@ pub trait AgentTool: Send + Sync {
 
 pub struct ToolExecutor {
     workspace_root: PathBuf,
+    last_checkpoint: Mutex<Option<String>>,
 }
 
 impl ToolExecutor {
     pub fn new(workspace_root: PathBuf) -> Self {
-        Self { workspace_root }
+        Self { workspace_root, last_checkpoint: Mutex::new(None) }
     }
 
     pub fn sanitize_path(&self, user_path: &Path) -> io::Result<PathBuf> {
@@ -450,30 +452,27 @@ impl ToolExecutor {
 
     pub async fn undo_git_checkpoint(&self) -> Result<String, std::io::Error> {
         let canonical_workspace = dunce::canonicalize(&self.workspace_root)?;
+        let hash = self.last_checkpoint.lock().await.clone();
+        let hash = hash.ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, "No checkpoint available to restore.")
+        })?;
 
-        #[cfg(target_os = "windows")]
-        let status = Command::new("cmd")
+        let output = Command::new("git")
             .current_dir(&canonical_workspace)
-            .args(["/C", "git stash pop"])
-            .status()
+            .args(["checkout", &hash, "--", "."])
+            .output()
             .await?;
 
-        #[cfg(not(target_os = "windows"))]
-        let status = Command::new("sh")
-            .current_dir(&canonical_workspace)
-            .args(["-c", "git stash pop"])
-            .status()
-            .await?;
-
-        if status.success() {
-            Ok(
-                "Successfully popped git stash checkpoint (reverted last agent file mutation)."
-                    .to_string(),
-            )
+        if output.status.success() {
+            Ok(format!(
+                "Successfully restored working tree to checkpoint {}",
+                hash
+            ))
         } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
             Err(io::Error::new(
                 io::ErrorKind::Other,
-                "Failed to pop git stash (no stash checkpoint found or git conflict).",
+                format!("Failed to restore checkpoint: {}", stderr),
             ))
         }
     }
@@ -537,17 +536,30 @@ impl ToolExecutor {
             return;
         }
 
-        let _ = Command::new("git")
+        let create_output = Command::new("git")
             .current_dir(&canonical_workspace)
-            .args(["add", "-A"])
+            .args(["stash", "create"])
             .output()
             .await;
 
-        let _ = Command::new("git")
-            .current_dir(&canonical_workspace)
-            .args(["stash", "push", "-m", message])
-            .output()
-            .await;
+        let hash = match create_output {
+            Ok(output) => {
+                let h = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if h.is_empty() {
+                    "HEAD".to_string()
+                } else {
+                    let _ = Command::new("git")
+                        .current_dir(&canonical_workspace)
+                        .args(["stash", "store", "-m", message, &h])
+                        .output()
+                        .await;
+                    h
+                }
+            }
+            Err(_) => return,
+        };
+
+        *self.last_checkpoint.lock().await = Some(hash);
     }
 
     pub async fn preview_write(
