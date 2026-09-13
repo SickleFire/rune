@@ -163,7 +163,7 @@ impl ToolExecutor {
         path: &Path,
         search: &str,
         replace: &str,
-    ) -> Result<(PathBuf, String), std::io::Error> {
+    ) -> Result<(PathBuf, String, String), std::io::Error> {
         let safe_path = self.sanitize_path(path)?;
 
         self.create_git_checkpoint(&format!("rune: pre-patch checkpoint for {:?}", path))
@@ -214,18 +214,28 @@ impl ToolExecutor {
         }
         println!();
 
-        Ok((safe_path, new_content))
+        Ok((safe_path, old_content, new_content))
     }
 
     pub async fn apply_patch(
         &self,
         safe_path: &Path,
+        expected_old_content: &str,
         new_content: &str,
         search_len: usize,
         replace_len: usize,
     ) -> Result<String, std::io::Error> {
+        let current = tokio::fs::read_to_string(safe_path).await.unwrap_or_default();
+        if current != expected_old_content {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!(
+                    "File {:?} changed on disk since the patch was previewed — re-read and re-patch to avoid clobbering the new changes.",
+                    safe_path
+                ),
+            ));
+        }
         tokio::fs::write(safe_path, new_content).await?;
-
         Ok(format!(
             "Successfully patched file {:?} (replaced {} bytes with {} bytes)",
             safe_path, search_len, replace_len
@@ -285,8 +295,6 @@ impl ToolExecutor {
             Err(e) => Err(e),
         }
     }
-
-    //TODOsymbols
 
     pub async fn search_symbol(&self, query: &str) -> Result<String, std::io::Error> {
         let canonical_workspace = dunce::canonicalize(&self.workspace_root)?;
@@ -546,7 +554,7 @@ impl ToolExecutor {
         &self,
         path: &Path,
         content: &str,
-    ) -> Result<PathBuf, std::io::Error> {
+    ) -> Result<(PathBuf, String), std::io::Error> {
         let safe_path = self.sanitize_path(path)?;
         self.create_git_checkpoint(&format!("rune: pre-write checkpoint for {:?}", path))
             .await;
@@ -572,23 +580,30 @@ impl ToolExecutor {
         println!();
         let _ = std::io::Write::flush(&mut std::io::stdout());
 
-        Ok(safe_path)
+        Ok((safe_path, old_content))
     }
 
     pub async fn apply_write(
         &self,
         safe_path: &Path,
+        expected_old_content: &str,
         content: &str,
     ) -> Result<String, std::io::Error> {
+        let current = tokio::fs::read_to_string(safe_path).await.unwrap_or_default();
+        if current != expected_old_content {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!(
+                    "File {:?} changed on disk since it was last read — re-read it before writing to avoid clobbering the new changes.",
+                    safe_path
+                ),
+            ));
+        }
         if let Some(parent) = safe_path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
         tokio::fs::write(safe_path, content).await?;
-        Ok(format!(
-            "Successfully wrote {} bytes to {:?}",
-            content.len(),
-            safe_path
-        ))
+        Ok(format!("Successfully wrote {} bytes to {:?}", content.len(), safe_path))
     }
 }
 
@@ -630,7 +645,7 @@ mod tests {
             .unwrap();
 
         let executor = ToolExecutor::new(dir.path().to_path_buf());
-        let (safe_path, new_content) = executor
+        let (safe_path, old_content, new_content) = executor
             .preview_patch(
                 Path::new("test.txt"),
                 "This is a test file.",
@@ -641,6 +656,7 @@ mod tests {
         let res = executor
             .apply_patch(
                 &safe_path,
+                &old_content,
                 &new_content,
                 "This is a test file.".len(),
                 "This is a patched file.".len(),
@@ -651,5 +667,43 @@ mod tests {
         let new_content = tokio::fs::read_to_string(&file_path).await.unwrap();
         assert!(new_content.contains("This is a patched file."));
         assert!(!new_content.contains("This is a test file."));
+    }
+
+    #[tokio::test]
+    async fn test_patch_file_rejects_stale_write() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.txt");
+        tokio::fs::write(&file_path, "Hello world!\nThis is a test file.\nGoodbye.\n")
+            .await
+            .unwrap();
+
+        let executor = ToolExecutor::new(dir.path().to_path_buf());
+        let (safe_path, old_content, new_content) = executor
+            .preview_patch(
+                Path::new("test.txt"),
+                "This is a test file.",
+                "This is a patched file.",
+            )
+            .await
+            .unwrap();
+
+        // Simulate an external edit landing after the preview but before apply.
+        tokio::fs::write(&file_path, "Hello world!\nSomeone else edited this.\nGoodbye.\n")
+            .await
+            .unwrap();
+
+        let res = executor
+            .apply_patch(
+                &safe_path,
+                &old_content,
+                &new_content,
+                "This is a test file.".len(),
+                "This is a patched file.".len(),
+            )
+            .await;
+
+        assert!(res.is_err());
+        let on_disk = tokio::fs::read_to_string(&file_path).await.unwrap();
+        assert!(on_disk.contains("Someone else edited this."));
     }
 }

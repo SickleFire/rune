@@ -297,6 +297,8 @@ struct OpenAIRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<OpenAITool>>,
     stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -374,6 +376,7 @@ pub struct OpenAIProvider {
     api_key: String,
     pub model: String,
     base_url: String,
+    reasoning_effort: Option<String>,
 }
 
 impl OpenAIProvider {
@@ -383,7 +386,13 @@ impl OpenAIProvider {
             api_key,
             model,
             base_url: "https://api.openai.com/v1".into(),
+            reasoning_effort: None,
         }
+    }
+
+    pub fn with_reasoning_effort(mut self, effort: impl Into<String>) -> Self {
+        self.reasoning_effort = Some(effort.into());
+        self
     }
 
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
@@ -475,6 +484,7 @@ impl LLMProvider for OpenAIProvider {
                 Some(oai_tools)
             },
             stream: true,
+            reasoning_effort: self.reasoning_effort.clone(),
         };
 
         let response = self
@@ -575,7 +585,7 @@ impl Agent {
     }
 
     pub fn new_openai(api_key: String, workspace_root: PathBuf, model: String) -> Self {
-        let provider = Arc::new(OpenAIProvider::new(api_key, model.clone()));
+        let provider = Arc::new(OpenAIProvider::new(api_key, model.clone()).with_reasoning_effort("none"));
         Self::with_provider(provider, model, workspace_root)
     }
 
@@ -897,18 +907,14 @@ impl Agent {
                 let path = tc.args["path"].as_str().unwrap_or("");
                 let search = tc.args["search"].as_str().unwrap_or("");
                 let replace = tc.args["replace"].as_str().unwrap_or("");
-                match self
-                    .executor
-                    .preview_patch(Path::new(path), search, replace)
-                    .await
-                {
-                    Ok((safe_path, new_content)) => {
+                match self.executor.preview_patch(Path::new(path), search, replace).await {
+                    Ok((safe_path, old_content, new_content)) => {
                         let (sl, rl) = (search.len(), replace.len());
                         if !auto_approve && !confirm_execution(tc).await {
                             return "Tool execution rejected by user.".into();
                         }
                         self.executor
-                            .apply_patch(&safe_path, &new_content, sl, rl)
+                            .apply_patch(&safe_path, &old_content, &new_content, sl, rl)
                             .await
                             .map(|_| "File patched successfully.".into())
                             .unwrap_or_else(|e| format!("Error applying patch: {e}"))
@@ -920,12 +926,12 @@ impl Agent {
                 let path = tc.args["path"].as_str().unwrap_or("");
                 let content = tc.args["content"].as_str().unwrap_or("");
                 match self.executor.preview_write(Path::new(path), content).await {
-                    Ok(safe_path) => {
+                    Ok((safe_path, old_content)) => {
                         if !auto_approve && !confirm_execution(tc).await {
                             return "Tool execution rejected by user.".into();
                         }
                         self.executor
-                            .apply_write(&safe_path, content)
+                            .apply_write(&safe_path, &old_content, content)
                             .await
                             .unwrap_or_else(|e| format!("Error writing file: {e}"))
                     }
