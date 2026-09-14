@@ -44,6 +44,8 @@ impl Completer for RuneHelper {
                 "/files",
                 "/tree",
                 "/auto",
+                "/plan",
+                "/execute",
                 "/model",
                 "/save",
                 "/load",
@@ -243,6 +245,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let mut auto_approve = false;
+    let mut plan_mode = false;
     let mut rl = Editor::new()?;
     rl.set_helper(Some(RuneHelper {
         hinter: HistoryHinter::new(),
@@ -303,6 +306,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     continue;
                 }
 
+                if prompt.eq_ignore_ascii_case("/plan") || prompt.starts_with("/plan ") {
+                    plan_mode = true;
+                    auto_approve = false;
+                    println!("{}", "Plan mode ENABLED. Rune will propose a detailed execution plan without executing mutating tools.".cyan().bold());
+                    let instruction = prompt.strip_prefix("/plan").unwrap_or("").trim();
+                    if !instruction.is_empty() {
+                        let plan_prompt = format!("[PLANNING MODE REQUEST] Please formulate a comprehensive, step-by-step execution plan to accomplish the following task without executing mutating tools:\n\n{instruction}");
+                        agent.run_with_mode(&plan_prompt, false, true).await;
+                        println!();
+                    }
+                    continue;
+                }
+
+                if prompt.eq_ignore_ascii_case("/execute") {
+                    plan_mode = false;
+                    println!("{}", "Execute mode ENABLED. Rune is now ready to execute tools and carry out tasks.".green().bold());
+                    continue;
+                }
                 if prompt.eq_ignore_ascii_case("/auto") || prompt.starts_with("/auto ") {
                     let parts: Vec<&str> = prompt.split_whitespace().collect();
                     if parts.len() > 1 {
@@ -574,6 +595,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         "/auto".green()
                     );
                     println!(
+                        "  - {:<22} : Enable planning mode for step-by-step proposals (/plan [task])",
+                        "/plan".green()
+                    );
+                    println!(
+                        "  - {:<22} : Enable execution mode to carry out plans and tool calls",
+                        "/execute".green()
+                    );
+                    println!(
                         "  - {:<22} : Switch or view LLM provider (/provider [gemini|openai] [model])",
                         "/provider".green()
                     );
@@ -599,7 +628,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                 let _ = rl.add_history_entry(prompt);
 
-                agent.run(prompt, auto_approve).await;
+                agent.run_with_mode(prompt, auto_approve, plan_mode).await;
                 println!();
             }
             Err(ReadlineError::Interrupted) => {

@@ -1,3 +1,4 @@
+use colored::*;
 use crate::tools::AgentTool;
 use crate::tools::ToolExecutor;
 use async_trait::async_trait;
@@ -235,7 +236,7 @@ impl LLMProvider for GeminiProvider {
         };
 
         let mut attempt = 0;
-        let max_retries = 5;
+        let max_retries = 10;
         let response = loop {
             attempt += 1;
             let res = self.client.post(&url).json(&request).send().await;
@@ -815,6 +816,10 @@ impl Agent {
     }
 
     pub async fn run(&mut self, raw_prompt: &str, auto_approve: bool) {
+        self.run_with_mode(raw_prompt, auto_approve, false).await;
+    }
+
+    pub async fn run_with_mode(&mut self, raw_prompt: &str, auto_approve: bool, plan_mode: bool) {
         // Auto-truncate history if character/token count gets too large (> 25,000 chars)
         let (_, chars) = self.get_history_stats();
         if chars > 25000 {
@@ -848,6 +853,11 @@ impl Agent {
 
             if tool_calls.is_empty() {
                 println!();
+                break;
+            }
+
+            if plan_mode {
+                println!("\n{}", "[Plan Mode Active: Tool calls suppressed. Review the plan above and switch to execute mode (/execute) to run actions.]".cyan().bold());
                 break;
             }
 
