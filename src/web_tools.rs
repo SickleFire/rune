@@ -329,3 +329,71 @@ impl AgentTool for CheckTcpPortTool {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_strip_html_tags() {
+        let html = r#"
+            <html>
+                <head>
+                    <title>Test Page</title>
+                    <style>body { color: red; }</style>
+                    <script>console.log("hello");</script>
+                </head>
+                <body>
+                    <h1>Welcome to Rune</h1>
+                    <p>This is a test paragraph with <b>bold</b> text.</p>
+                </body>
+            </html>
+        "#;
+
+        let stripped = strip_html_tags(html);
+        assert!(stripped.contains("Welcome to Rune"));
+        assert!(stripped.contains("This is a test paragraph with bold text."));
+        assert!(!stripped.contains("color: red"));
+        assert!(!stripped.contains("console.log"));
+        assert!(!stripped.contains("<title>"));
+    }
+
+    #[tokio::test]
+    async fn test_check_tcp_port_missing_arg() {
+        let tool = CheckTcpPortTool::new();
+        let result = tool.execute(json!({})).await;
+        assert!(result.contains("Error: Missing or invalid required argument 'port'"));
+    }
+
+    #[tokio::test]
+    async fn test_check_tcp_port_closed() {
+        // Bind a random port, then drop it so it's closed, or use a closed port
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener); // port is now closed
+
+        let tool = CheckTcpPortTool::new();
+        let result = tool.execute(json!({ "port": port })).await;
+        assert!(result.contains("Closed/Refused") || result.contains("Timeout"));
+    }
+
+    #[tokio::test]
+    async fn test_http_request_missing_args() {
+        let tool = HttpRequestTool::new();
+        let res_no_method = tool.execute(json!({ "url": "http://example.com" })).await;
+        assert!(res_no_method.contains("Error: Missing required argument 'method'"));
+
+        let res_no_url = tool.execute(json!({ "method": "GET" })).await;
+        assert!(res_no_url.contains("Error: Missing required argument 'url'"));
+
+        let res_bad_method = tool.execute(json!({ "method": "INVALID", "url": "http://example.com" })).await;
+        assert!(res_bad_method.contains("Error: Unsupported HTTP method"));
+    }
+
+    #[tokio::test]
+    async fn test_fetch_web_page_missing_url() {
+        let tool = FetchWebPageTool::new();
+        let res = tool.execute(json!({})).await;
+        assert!(res.contains("Error: Missing required argument 'url'"));
+    }
+}
