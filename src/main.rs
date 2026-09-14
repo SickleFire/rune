@@ -196,6 +196,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         agent = agent
             .with_tool(std::sync::Arc::new(rune::github_tools::GitHubIssueTool::new()))
             .with_tool(std::sync::Arc::new(rune::github_tools::GitHubPullRequestDiffTool::new()))
+            .with_tool(std::sync::Arc::new(rune::github_tools::GitHubCreateIssueTool::new()))
+            .with_tool(std::sync::Arc::new(rune::github_tools::GitHubCreateCommentTool::new()))
+            .with_tool(std::sync::Arc::new(rune::github_tools::GitHubCreatePullRequestTool::new()))
     }
 
     let mut auto_approve = false;
@@ -452,6 +455,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     println!(
                         "  - {:<18} : Fetch unified git diff of a GitHub PR for review (with --github)",
                         "github_read_pr_diff".green()
+                    );
+                    println!(
+                        "  - {:<18} : Create a new GitHub issue (requires confirmation) (with --github)",
+                        "github_create_issue".green()
+                    );
+                    println!(
+                        "  - {:<18} : Post a comment on a GitHub issue or PR (requires confirmation) (with --github)",
+                        "github_create_comment".green()
+                    );
+                    println!(
+                        "  - {:<18} : Create a new GitHub pull request (requires confirmation) (with --github)",
+                        "github_create_pull_request".green()
                     );
                     continue;
                 }

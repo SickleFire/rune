@@ -896,10 +896,11 @@ impl Agent {
         if let Some(tool) = self.dynamic_tools.get(name) {
             return !tool.is_destructive();
         }
-        matches!(
+        let out = matches!(
             name,
             "list_files" | "read_file" | "search_code" | "git_status" | "git_diff" | "search_symbol"
-        )
+        );
+        out
     }
 
     async fn execute_tool(&self, tc: &CanonicalToolCall, auto_approve: bool) -> String {
@@ -1049,7 +1050,7 @@ async fn confirm_execution(tc: &CanonicalToolCall) -> bool {
 }
 
 pub fn get_tool_declarations() -> Vec<FunctionDeclaration> {
-    vec![
+    let out = vec![
         FunctionDeclaration {
             name: "list_files".into(),
             description: "List files and directories in a given relative path.".into(),
@@ -1173,7 +1174,8 @@ pub fn get_tool_declarations() -> Vec<FunctionDeclaration> {
                 "required": ["commands"]
             }),
         },
-    ]
+    ];
+    out
 }
 
 fn gemini_normalize_schema(value: &mut serde_json::Value) {

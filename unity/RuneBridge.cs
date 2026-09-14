@@ -39,11 +39,14 @@ public static class RuneBridge
     {
         try
         {
+            // Ensure Unity runs in the background even when the Editor window is not in focus
+            Application.runInBackground = true;
+
             listener = new HttpListener();
             listener.Prefixes.Add($"http://localhost:{PORT}/");
             listener.Start();
             listener.BeginGetContext(OnRequest, null);
-            Debug.Log($"[RuneBridge] Server listening on http://localhost:{PORT}/");
+            Debug.Log($"[RuneBridge] Server listening on http://localhost:{PORT}/ (RunInBackground: {Application.runInBackground})");
         }
         catch (Exception ex)
         {
@@ -740,4 +743,3 @@ public static class RuneBridge
     }
 
 }
-

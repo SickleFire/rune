@@ -7,6 +7,7 @@ Rune is an expert AI coding assistant integrated into a software development wor
 - **Interactive REPL & CLI**: Powered by `rustyline` with colorized output and prompt support.
 - **Tool Execution Framework**: Rich set of built-in tools for workspace inspection, file reading/writing/patching, executing shell commands, and git operations.
 - **Web Utility Tools**: Built-in HTTP request execution (`http_request`), web page scraping/fetching (`fetch_web_page`), and TCP port verification (`check_tcp_port`).
+- **GitHub Integration**: Optional GitHub integration (`--github` flag or `GITHUB_TOKEN`) supporting reading issues & PR diffs, creating issues, posting comments, and opening pull requests.
 - **Unity Editor Integration**: Optional Unity Bridge (`--unity` flag) supporting scene inspection, game object/component management, asset searching, reference validation, console log reading, and play mode control.
 - **Async API Client**: Robust integration with LLM APIs supporting tool calling and streaming responses.
 - **Smart Context**: Global awareness of repository architecture and file systems.
