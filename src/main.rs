@@ -146,6 +146,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
     let enable_unity = args.contains(&"--unity".to_string());
     let enable_web = args.contains(&"--web".to_string());
+    let enable_github = args.contains(&"--github".to_string()) || env::var("GITHUB_TOKEN").is_ok();
 
     if enable_unity {
         println!("{}", "Unity editor tools enabled.".cyan());
@@ -188,6 +189,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .with_tool(std::sync::Arc::new(rune::web_tools::HttpRequestTool::new()))
             .with_tool(std::sync::Arc::new(rune::web_tools::FetchWebPageTool::new()))
             .with_tool(std::sync::Arc::new(rune::web_tools::CheckTcpPortTool::new()))
+    }
+
+    if enable_github {
+        println!("{}", "GitHub integration tools enabled.".cyan());
+        agent = agent
+            .with_tool(std::sync::Arc::new(rune::github_tools::GitHubIssueTool::new()))
+            .with_tool(std::sync::Arc::new(rune::github_tools::GitHubPullRequestDiffTool::new()))
     }
 
     let mut auto_approve = false;
@@ -436,6 +444,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     println!(
                         "  - {:<18} : Undo the last file mutation via git stash checkpoint",
                         "undo_git_checkpoint".green()
+                    );
+                    println!(
+                        "  - {:<18} : Read GitHub issue details & comments (with --github)",
+                        "github_read_issue".green()
+                    );
+                    println!(
+                        "  - {:<18} : Fetch unified git diff of a GitHub PR for review (with --github)",
+                        "github_read_pr_diff".green()
                     );
                     continue;
                 }
