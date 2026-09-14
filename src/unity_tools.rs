@@ -602,3 +602,60 @@ impl AgentTool for UnityTogglePlayModeTool {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_unity_inspect_components_missing_arg() {
+        let tool = UnityInspectComponentsTool::new();
+        let result = tool.execute(json!({})).await;
+        assert!(result.contains("Error: Missing required argument 'objectName'"));
+    }
+
+    #[tokio::test]
+    async fn test_tool_declarations_and_properties() {
+        let inspect_scene = UnityInspectSceneTool::new();
+        assert_eq!(inspect_scene.declaration().name, "unity_inspect_scene");
+        assert!(inspect_scene.is_read_only());
+
+        let set_prop = UnitySetPropertyTool::new();
+        assert_eq!(set_prop.declaration().name, "unity_set_property");
+        assert!(!set_prop.is_read_only());
+        assert!(set_prop.is_destructive());
+
+        let validate_refs = UnityValidateReferencesTool::new();
+        assert_eq!(validate_refs.declaration().name, "unity_validate_references");
+        assert!(validate_refs.is_read_only());
+
+        let assign_ref = UnityAssignReferenceTool::new();
+        assert_eq!(assign_ref.declaration().name, "unity_assign_reference");
+        assert!(!assign_ref.is_read_only());
+        assert!(assign_ref.is_destructive());
+
+        let destroy_go = UnityDestroyGameObjectTool::new();
+        assert_eq!(destroy_go.declaration().name, "unity_destroy_game_object");
+        assert!(destroy_go.is_destructive());
+
+        let find_assets = UnityFindAssetsTool::new();
+        assert_eq!(find_assets.declaration().name, "unity_find_assets");
+        assert!(find_assets.is_read_only());
+    }
+
+    #[tokio::test]
+    async fn test_unity_bridge_offline_network_error() {
+        // When Unity Bridge (port 8088) is not running, calling execution should gracefully return a network error.
+        let tool = UnityInspectSceneTool::new();
+        let result = tool.execute(json!({})).await;
+        assert!(
+            result.contains("Unity Bridge Network Error") || result.contains("Unity Bridge Error")
+        );
+
+        let inspect_comps = UnityInspectComponentsTool::new();
+        let result2 = inspect_comps.execute(json!({ "objectName": "Player" })).await;
+        assert!(
+            result2.contains("Unity Bridge Network Error") || result2.contains("Unity Bridge Error")
+        );
+    }
+}
