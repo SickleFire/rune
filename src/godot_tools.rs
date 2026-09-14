@@ -1,7 +1,7 @@
 use crate::api::FunctionDeclaration;
 use crate::tools::AgentTool;
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub struct GodotInspectSceneTool {
     client: reqwest::Client,
@@ -34,7 +34,9 @@ impl AgentTool for GodotInspectSceneTool {
         match self.client.get(url).send().await {
             Ok(res) if res.status().is_success() => res.text().await.unwrap_or_default(),
             Ok(res) => format!("Godot Bridge Error: HTTP {}", res.status()),
-            Err(e) => format!("Godot Bridge Network Error: {e} (Ensure Godot editor is running with RuneBridge.cs active on port 8089)"),
+            Err(e) => format!(
+                "Godot Bridge Network Error: {e} (Ensure Godot editor is running with RuneBridge.cs active on port 8089)"
+            ),
         }
     }
 
@@ -60,7 +62,8 @@ impl AgentTool for GodotInspectNodePropertiesTool {
     fn declaration(&self) -> FunctionDeclaration {
         FunctionDeclaration {
             name: "godot_inspect_node_properties".to_string(),
-            description: "Inspect properties and exported fields of a Godot node by its path.".to_string(),
+            description: "Inspect properties and exported fields of a Godot node by its path."
+                .to_string(),
             parameters: json!({
                 "type": "OBJECT",
                 "properties": {
@@ -80,7 +83,10 @@ impl AgentTool for GodotInspectNodePropertiesTool {
             None => return "Error: Missing 'nodePath' argument".to_string(),
         };
 
-        let url = format!("http://localhost:8089/node/inspect-properties?nodePath={}", urlencoding::encode(node_path));
+        let url = format!(
+            "http://localhost:8089/node/inspect-properties?nodePath={}",
+            urlencoding::encode(node_path)
+        );
         match self.client.get(&url).send().await {
             Ok(res) if res.status().is_success() => res.text().await.unwrap_or_default(),
             Ok(res) => format!("Godot Bridge Error: HTTP {}", res.status()),

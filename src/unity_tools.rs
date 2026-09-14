@@ -626,7 +626,10 @@ mod tests {
         assert!(set_prop.is_destructive());
 
         let validate_refs = UnityValidateReferencesTool::new();
-        assert_eq!(validate_refs.declaration().name, "unity_validate_references");
+        assert_eq!(
+            validate_refs.declaration().name,
+            "unity_validate_references"
+        );
         assert!(validate_refs.is_read_only());
 
         let assign_ref = UnityAssignReferenceTool::new();
@@ -653,9 +656,12 @@ mod tests {
         );
 
         let inspect_comps = UnityInspectComponentsTool::new();
-        let result2 = inspect_comps.execute(json!({ "objectName": "Player" })).await;
+        let result2 = inspect_comps
+            .execute(json!({ "objectName": "Player" }))
+            .await;
         assert!(
-            result2.contains("Unity Bridge Network Error") || result2.contains("Unity Bridge Error")
+            result2.contains("Unity Bridge Network Error")
+                || result2.contains("Unity Bridge Error")
         );
     }
 }

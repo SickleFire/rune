@@ -386,7 +386,9 @@ mod tests {
         let res_no_url = tool.execute(json!({ "method": "GET" })).await;
         assert!(res_no_url.contains("Error: Missing required argument 'url'"));
 
-        let res_bad_method = tool.execute(json!({ "method": "INVALID", "url": "http://example.com" })).await;
+        let res_bad_method = tool
+            .execute(json!({ "method": "INVALID", "url": "http://example.com" }))
+            .await;
         assert!(res_bad_method.contains("Error: Unsupported HTTP method"));
     }
 

@@ -26,7 +26,10 @@ pub struct ToolExecutor {
 
 impl ToolExecutor {
     pub fn new(workspace_root: PathBuf) -> Self {
-        Self { workspace_root, last_checkpoint: Mutex::new(None) }
+        Self {
+            workspace_root,
+            last_checkpoint: Mutex::new(None),
+        }
     }
 
     pub fn sanitize_path(&self, user_path: &Path) -> io::Result<PathBuf> {
@@ -227,7 +230,9 @@ impl ToolExecutor {
         search_len: usize,
         replace_len: usize,
     ) -> Result<String, std::io::Error> {
-        let current = tokio::fs::read_to_string(safe_path).await.unwrap_or_default();
+        let current = tokio::fs::read_to_string(safe_path)
+            .await
+            .unwrap_or_default();
         if current != expected_old_content {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
@@ -454,7 +459,10 @@ impl ToolExecutor {
         let canonical_workspace = dunce::canonicalize(&self.workspace_root)?;
         let hash = self.last_checkpoint.lock().await.clone();
         let hash = hash.ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, "No checkpoint available to restore.")
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "No checkpoint available to restore.",
+            )
         })?;
 
         let output = Command::new("git")
@@ -601,7 +609,9 @@ impl ToolExecutor {
         expected_old_content: &str,
         content: &str,
     ) -> Result<String, std::io::Error> {
-        let current = tokio::fs::read_to_string(safe_path).await.unwrap_or_default();
+        let current = tokio::fs::read_to_string(safe_path)
+            .await
+            .unwrap_or_default();
         if current != expected_old_content {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
@@ -615,7 +625,11 @@ impl ToolExecutor {
             tokio::fs::create_dir_all(parent).await?;
         }
         tokio::fs::write(safe_path, content).await?;
-        Ok(format!("Successfully wrote {} bytes to {:?}", content.len(), safe_path))
+        Ok(format!(
+            "Successfully wrote {} bytes to {:?}",
+            content.len(),
+            safe_path
+        ))
     }
 }
 
@@ -700,9 +714,12 @@ mod tests {
             .unwrap();
 
         // Simulate an external edit landing after the preview but before apply.
-        tokio::fs::write(&file_path, "Hello world!\nSomeone else edited this.\nGoodbye.\n")
-            .await
-            .unwrap();
+        tokio::fs::write(
+            &file_path,
+            "Hello world!\nSomeone else edited this.\nGoodbye.\n",
+        )
+        .await
+        .unwrap();
 
         let res = executor
             .apply_patch(

@@ -266,7 +266,10 @@ impl LLMProvider for GeminiProvider {
                                     text_buf.push_str(t);
                                 }
                                 if let Some(call) = part.function_call {
-                                    if !tool_calls.iter().any(|tc| tc.name == call.name && tc.args == call.args) {
+                                    if !tool_calls
+                                        .iter()
+                                        .any(|tc| tc.name == call.name && tc.args == call.args)
+                                    {
                                         tool_calls.push(CanonicalToolCall {
                                             id: format!("{}_{}", call.name, call_counter),
                                             name: call.name,
@@ -566,7 +569,8 @@ impl LLMProvider for OpenAIProvider {
             .map(|(id, name, args_str)| CanonicalToolCall {
                 id,
                 name,
-                args: serde_json::from_str(&args_str).unwrap_or(serde_json::Value::Object(Default::default())),
+                args: serde_json::from_str(&args_str)
+                    .unwrap_or(serde_json::Value::Object(Default::default())),
                 thought_signature: None,
             })
             .collect();
@@ -594,7 +598,8 @@ impl Agent {
     }
 
     pub fn new_openai(api_key: String, workspace_root: PathBuf, model: String) -> Self {
-        let provider = Arc::new(OpenAIProvider::new(api_key, model.clone()).with_reasoning_effort("none"));
+        let provider =
+            Arc::new(OpenAIProvider::new(api_key, model.clone()).with_reasoning_effort("none"));
         Self::with_provider(provider, model, workspace_root)
     }
 
@@ -759,7 +764,10 @@ impl Agent {
             // Retain the last `max_messages`
             pruned.extend(self.history[start..].iter().cloned());
             self.history = pruned;
-            println!("[Rune: History truncated to last {} messages (+ system context)]", max_messages);
+            println!(
+                "[Rune: History truncated to last {} messages (+ system context)]",
+                max_messages
+            );
         }
     }
 
@@ -898,7 +906,12 @@ impl Agent {
         }
         let out = matches!(
             name,
-            "list_files" | "read_file" | "search_code" | "git_status" | "git_diff" | "search_symbol"
+            "list_files"
+                | "read_file"
+                | "search_code"
+                | "git_status"
+                | "git_diff"
+                | "search_symbol"
         );
         out
     }
@@ -917,7 +930,11 @@ impl Agent {
                 let path = tc.args["path"].as_str().unwrap_or("");
                 let search = tc.args["search"].as_str().unwrap_or("");
                 let replace = tc.args["replace"].as_str().unwrap_or("");
-                match self.executor.preview_patch(Path::new(path), search, replace).await {
+                match self
+                    .executor
+                    .preview_patch(Path::new(path), search, replace)
+                    .await
+                {
                     Ok((safe_path, old_content, new_content)) => {
                         let (sl, rl) = (search.len(), replace.len());
                         if !auto_approve && !confirm_execution(tc).await {
@@ -1109,19 +1126,15 @@ pub fn get_tool_declarations() -> Vec<FunctionDeclaration> {
                 "required": ["query"]
             }),
         },
-
         FunctionDeclaration {
             name: "search_symbol".into(),
-            description:
-                "Get the symbols of a file via the cix indexed engine"
-                    .into(),
+            description: "Get the symbols of a file via the cix indexed engine".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": { "query": { "type": "string", "description": "<FILE> to request symbols of" } },
                 "required": ["query"]
             }),
         },
-
         FunctionDeclaration {
             name: "git_status".into(),
             description: "Check the current git status of the repository.".into(),

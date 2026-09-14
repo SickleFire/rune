@@ -66,19 +66,32 @@ impl AgentTool for GitHubIssueTool {
         };
         let issue_number = match args.get("issue_number").and_then(|v| v.as_i64()) {
             Some(n) => n,
-            None => match args.get("issue_number").and_then(|v| v.as_str()).and_then(|s| s.parse::<i64>().ok()) {
+            None => match args
+                .get("issue_number")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<i64>().ok())
+            {
                 Some(n) => n,
-                None => return "Error: Missing or invalid required argument 'issue_number'".to_string(),
+                None => {
+                    return "Error: Missing or invalid required argument 'issue_number'".to_string();
+                }
             },
         };
 
-        let token = args.get("github_token")
+        let token = args
+            .get("github_token")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .or_else(|| std::env::var("GITHUB_TOKEN").ok());
 
-        let url = format!("https://api.github.com/repos/{}/{}/issues/{}", owner, repo, issue_number);
-        let comments_url = format!("https://api.github.com/repos/{}/{}/issues/{}/comments", owner, repo, issue_number);
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/issues/{}",
+            owner, repo, issue_number
+        );
+        let comments_url = format!(
+            "https://api.github.com/repos/{}/{}/issues/{}/comments",
+            owner, repo, issue_number
+        );
 
         let mut req_builder = self.client.get(&url);
         let mut comments_req_builder = self.client.get(&comments_url);
@@ -87,7 +100,8 @@ impl AgentTool for GitHubIssueTool {
             let auth_val = format!("Bearer {}", t);
             if let Ok(val) = reqwest::header::HeaderValue::from_str(&auth_val) {
                 req_builder = req_builder.header(reqwest::header::AUTHORIZATION, val.clone());
-                comments_req_builder = comments_req_builder.header(reqwest::header::AUTHORIZATION, val);
+                comments_req_builder =
+                    comments_req_builder.header(reqwest::header::AUTHORIZATION, val);
             }
         }
 
@@ -98,16 +112,37 @@ impl AgentTool for GitHubIssueTool {
         let issue_text = match issue_res {
             Ok(res) => {
                 if !res.status().is_success() {
-                    return format!("GitHub API Error: HTTP status {} when fetching issue #{}", res.status(), issue_number);
+                    return format!(
+                        "GitHub API Error: HTTP status {} when fetching issue #{}",
+                        res.status(),
+                        issue_number
+                    );
                 }
                 match res.json::<Value>().await {
                     Ok(json) => {
-                        let title = json.get("title").and_then(|v| v.as_str()).unwrap_or("<no title>");
-                        let user = json.get("user").and_then(|v| v.as_object()).and_then(|u| u.get("login")).and_then(|v| v.as_str()).unwrap_or("unknown");
-                        let state = json.get("state").and_then(|v| v.as_str()).unwrap_or("unknown");
-                        let body = json.get("body").and_then(|v| v.as_str()).unwrap_or("<no description>");
+                        let title = json
+                            .get("title")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("<no title>");
+                        let user = json
+                            .get("user")
+                            .and_then(|v| v.as_object())
+                            .and_then(|u| u.get("login"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+                        let state = json
+                            .get("state")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+                        let body = json
+                            .get("body")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("<no description>");
                         let html_url = json.get("html_url").and_then(|v| v.as_str()).unwrap_or("");
-                        let created_at = json.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
+                        let created_at = json
+                            .get("created_at")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
 
                         format!(
                             "=== GitHub Issue #{} ({}) ===\nTitle: {}\nAuthor: {}\nCreated At: {}\nURL: {}\n\nDescription:\n{}\n",
@@ -121,21 +156,24 @@ impl AgentTool for GitHubIssueTool {
         };
 
         let comments_text = match comments_res {
-            Ok(res) if res.status().is_success() => {
-                match res.json::<Value>().await {
-                    Ok(Value::Array(comments)) if !comments.is_empty() => {
-                        let mut out = String::from("\n=== Comments ===\n");
-                        for c in comments {
-                            let commenter = c.get("user").and_then(|v| v.as_object()).and_then(|u| u.get("login")).and_then(|v| v.as_str()).unwrap_or("unknown");
-                            let cbody = c.get("body").and_then(|v| v.as_str()).unwrap_or("");
-                            let cdate = c.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
-                            out.push_str(&format!("@{} (on {}):\n{}\n\n", commenter, cdate, cbody));
-                        }
-                        out
+            Ok(res) if res.status().is_success() => match res.json::<Value>().await {
+                Ok(Value::Array(comments)) if !comments.is_empty() => {
+                    let mut out = String::from("\n=== Comments ===\n");
+                    for c in comments {
+                        let commenter = c
+                            .get("user")
+                            .and_then(|v| v.as_object())
+                            .and_then(|u| u.get("login"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+                        let cbody = c.get("body").and_then(|v| v.as_str()).unwrap_or("");
+                        let cdate = c.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
+                        out.push_str(&format!("@{} (on {}):\n{}\n\n", commenter, cdate, cbody));
                     }
-                    _ => String::from("\n=== Comments ===\nNo comments found.\n"),
+                    out
                 }
-            }
+                _ => String::from("\n=== Comments ===\nNo comments found.\n"),
+            },
             _ => String::new(),
         };
 
@@ -207,18 +245,28 @@ impl AgentTool for GitHubPullRequestDiffTool {
         };
         let pull_number = match args.get("pull_number").and_then(|v| v.as_i64()) {
             Some(n) => n,
-            None => match args.get("pull_number").and_then(|v| v.as_str()).and_then(|s| s.parse::<i64>().ok()) {
+            None => match args
+                .get("pull_number")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<i64>().ok())
+            {
                 Some(n) => n,
-                None => return "Error: Missing or invalid required argument 'pull_number'".to_string(),
+                None => {
+                    return "Error: Missing or invalid required argument 'pull_number'".to_string();
+                }
             },
         };
 
-        let token = args.get("github_token")
+        let token = args
+            .get("github_token")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .or_else(|| std::env::var("GITHUB_TOKEN").ok());
 
-        let url = format!("https://api.github.com/repos/{}/{}/pulls/{}", owner, repo, pull_number);
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/pulls/{}",
+            owner, repo, pull_number
+        );
 
         let mut req_builder = self.client.get(&url);
         if let Some(ref t) = token {
@@ -233,21 +281,36 @@ impl AgentTool for GitHubPullRequestDiffTool {
         match req_builder.send().await {
             Ok(res) => {
                 if !res.status().is_success() {
-                    return format!("GitHub API Error: HTTP status {} when fetching PR diff for #{}", res.status(), pull_number);
+                    return format!(
+                        "GitHub API Error: HTTP status {} when fetching PR diff for #{}",
+                        res.status(),
+                        pull_number
+                    );
                 }
                 match res.text().await {
                     Ok(diff) => {
                         if diff.is_empty() {
-                            let out = format!("Pull Request #{} has an empty diff or no changes.", pull_number);
+                            let out = format!(
+                                "Pull Request #{} has an empty diff or no changes.",
+                                pull_number
+                            );
                             out
                         } else {
                             // Truncate if excessively large to keep LLM context clean, or return full diff
                             let max_len = 65536;
                             if diff.len() > max_len {
-                                let out = format!("=== GitHub Pull Request #{} Diff (Truncated to {} chars) ===\n\n{}", pull_number, max_len, &diff[..max_len]);
+                                let out = format!(
+                                    "=== GitHub Pull Request #{} Diff (Truncated to {} chars) ===\n\n{}",
+                                    pull_number,
+                                    max_len,
+                                    &diff[..max_len]
+                                );
                                 out
                             } else {
-                                let out = format!("=== GitHub Pull Request #{} Diff ===\n\n{}", pull_number, diff);
+                                let out = format!(
+                                    "=== GitHub Pull Request #{} Diff ===\n\n{}",
+                                    pull_number, diff
+                                );
                                 out
                             }
                         }
@@ -338,7 +401,8 @@ impl AgentTool for GitHubCreateIssueTool {
         let body = args.get("body").and_then(|v| v.as_str()).unwrap_or("");
         let labels = args.get("labels").cloned().unwrap_or(json!([]));
 
-        let token = args.get("github_token")
+        let token = args
+            .get("github_token")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .or_else(|| std::env::var("GITHUB_TOKEN").ok());
@@ -366,16 +430,26 @@ impl AgentTool for GitHubCreateIssueTool {
                     Ok(json) => {
                         if status.is_success() {
                             let number = json.get("number").and_then(|v| v.as_i64()).unwrap_or(0);
-                            let html_url = json.get("html_url").and_then(|v| v.as_str()).unwrap_or("");
-                            let out = format!("Successfully created GitHub issue #{}! URL: {}", number, html_url);
+                            let html_url =
+                                json.get("html_url").and_then(|v| v.as_str()).unwrap_or("");
+                            let out = format!(
+                                "Successfully created GitHub issue #{}! URL: {}",
+                                number, html_url
+                            );
                             out
                         } else {
-                            let message = json.get("message").and_then(|v| v.as_str()).unwrap_or("Unknown error");
+                            let message = json
+                                .get("message")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("Unknown error");
                             let out = format!("GitHub API Error (HTTP {}): {}", status, message);
                             out
                         }
                     }
-                    Err(e) => format!("GitHub API Error (HTTP {}), failed to parse JSON response: {e}", status),
+                    Err(e) => format!(
+                        "GitHub API Error (HTTP {}), failed to parse JSON response: {e}",
+                        status
+                    ),
                 }
             }
             Err(e) => format!("GitHub Network Error: {e}"),
@@ -404,8 +478,7 @@ impl AgentTool for GitHubCreateCommentTool {
     fn declaration(&self) -> FunctionDeclaration {
         FunctionDeclaration {
             name: "github_create_comment".to_string(),
-            description: "Post a comment on an existing GitHub issue or pull request."
-                .to_string(),
+            description: "Post a comment on an existing GitHub issue or pull request.".to_string(),
             parameters: json!({
                 "type": "OBJECT",
                 "properties": {
@@ -450,9 +523,15 @@ impl AgentTool for GitHubCreateCommentTool {
         };
         let issue_number = match args.get("issue_number").and_then(|v| v.as_i64()) {
             Some(n) => n,
-            None => match args.get("issue_number").and_then(|v| v.as_str()).and_then(|s| s.parse::<i64>().ok()) {
+            None => match args
+                .get("issue_number")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<i64>().ok())
+            {
                 Some(n) => n,
-                None => return "Error: Missing or invalid required argument 'issue_number'".to_string(),
+                None => {
+                    return "Error: Missing or invalid required argument 'issue_number'".to_string();
+                }
             },
         };
         let body = match args.get("body").and_then(|v| v.as_str()) {
@@ -460,12 +539,16 @@ impl AgentTool for GitHubCreateCommentTool {
             None => return "Error: Missing required argument 'body'".to_string(),
         };
 
-        let token = args.get("github_token")
+        let token = args
+            .get("github_token")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .or_else(|| std::env::var("GITHUB_TOKEN").ok());
 
-        let url = format!("https://api.github.com/repos/{}/{}/issues/{}/comments", owner, repo, issue_number);
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/issues/{}/comments",
+            owner, repo, issue_number
+        );
         let mut req_builder = self.client.post(&url);
 
         if let Some(ref t) = token {
@@ -483,16 +566,26 @@ impl AgentTool for GitHubCreateCommentTool {
                 match res.json::<Value>().await {
                     Ok(json) => {
                         if status.is_success() {
-                            let html_url = json.get("html_url").and_then(|v| v.as_str()).unwrap_or("");
-                            let out = format!("Successfully posted comment on issue/PR #{}! URL: {}", issue_number, html_url);
+                            let html_url =
+                                json.get("html_url").and_then(|v| v.as_str()).unwrap_or("");
+                            let out = format!(
+                                "Successfully posted comment on issue/PR #{}! URL: {}",
+                                issue_number, html_url
+                            );
                             out
                         } else {
-                            let message = json.get("message").and_then(|v| v.as_str()).unwrap_or("Unknown error");
+                            let message = json
+                                .get("message")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("Unknown error");
                             let out = format!("GitHub API Error (HTTP {}): {}", status, message);
                             out
                         }
                     }
-                    Err(e) => format!("GitHub API Error (HTTP {}), failed to parse JSON response: {e}", status),
+                    Err(e) => format!(
+                        "GitHub API Error (HTTP {}), failed to parse JSON response: {e}",
+                        status
+                    ),
                 }
             }
             Err(e) => format!("GitHub Network Error: {e}"),
@@ -593,7 +686,8 @@ impl AgentTool for GitHubCreatePullRequestTool {
         let body = args.get("body").and_then(|v| v.as_str()).unwrap_or("");
         let draft = args.get("draft").and_then(|v| v.as_bool()).unwrap_or(false);
 
-        let token = args.get("github_token")
+        let token = args
+            .get("github_token")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .or_else(|| std::env::var("GITHUB_TOKEN").ok());
@@ -623,16 +717,26 @@ impl AgentTool for GitHubCreatePullRequestTool {
                     Ok(json) => {
                         if status.is_success() {
                             let number = json.get("number").and_then(|v| v.as_i64()).unwrap_or(0);
-                            let html_url = json.get("html_url").and_then(|v| v.as_str()).unwrap_or("");
-                            let out = format!("Successfully created GitHub Pull Request #{}! URL: {}", number, html_url);
+                            let html_url =
+                                json.get("html_url").and_then(|v| v.as_str()).unwrap_or("");
+                            let out = format!(
+                                "Successfully created GitHub Pull Request #{}! URL: {}",
+                                number, html_url
+                            );
                             out
                         } else {
-                            let message = json.get("message").and_then(|v| v.as_str()).unwrap_or("Unknown error");
+                            let message = json
+                                .get("message")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("Unknown error");
                             let out = format!("GitHub API Error (HTTP {}): {}", status, message);
                             out
                         }
                     }
-                    Err(e) => format!("GitHub API Error (HTTP {}), failed to parse JSON response: {e}", status),
+                    Err(e) => format!(
+                        "GitHub API Error (HTTP {}), failed to parse JSON response: {e}",
+                        status
+                    ),
                 }
             }
             Err(e) => format!("GitHub Network Error: {e}"),
@@ -650,14 +754,18 @@ mod tests {
         let res = tool.execute(json!({ "owner": "test" })).await;
         assert!(res.contains("Error: Missing required argument 'repo'"));
 
-        let res2 = tool.execute(json!({ "owner": "test", "repo": "repo" })).await;
+        let res2 = tool
+            .execute(json!({ "owner": "test", "repo": "repo" }))
+            .await;
         assert!(res2.contains("Error: Missing or invalid required argument 'issue_number'"));
     }
 
     #[tokio::test]
     async fn test_github_pr_diff_missing_args() {
         let tool = GitHubPullRequestDiffTool::new();
-        let res = tool.execute(json!({ "owner": "test", "repo": "repo" })).await;
+        let res = tool
+            .execute(json!({ "owner": "test", "repo": "repo" }))
+            .await;
         assert!(res.contains("Error: Missing or invalid required argument 'pull_number'"));
     }
 
@@ -667,27 +775,37 @@ mod tests {
         let res = tool.execute(json!({ "owner": "test" })).await;
         assert!(res.contains("Error: Missing required argument 'repo'"));
 
-        let res2 = tool.execute(json!({ "owner": "test", "repo": "repo" })).await;
+        let res2 = tool
+            .execute(json!({ "owner": "test", "repo": "repo" }))
+            .await;
         assert!(res2.contains("Error: Missing required argument 'title'"));
     }
 
     #[tokio::test]
     async fn test_github_create_comment_missing_args() {
         let tool = GitHubCreateCommentTool::new();
-        let res = tool.execute(json!({ "owner": "test", "repo": "repo" })).await;
+        let res = tool
+            .execute(json!({ "owner": "test", "repo": "repo" }))
+            .await;
         assert!(res.contains("Error: Missing or invalid required argument 'issue_number'"));
 
-        let res2 = tool.execute(json!({ "owner": "test", "repo": "repo", "issue_number": 1 })).await;
+        let res2 = tool
+            .execute(json!({ "owner": "test", "repo": "repo", "issue_number": 1 }))
+            .await;
         assert!(res2.contains("Error: Missing required argument 'body'"));
     }
 
     #[tokio::test]
     async fn test_github_create_pr_missing_args() {
         let tool = GitHubCreatePullRequestTool::new();
-        let res = tool.execute(json!({ "owner": "test", "repo": "repo" })).await;
+        let res = tool
+            .execute(json!({ "owner": "test", "repo": "repo" }))
+            .await;
         assert!(res.contains("Error: Missing required argument 'title'"));
 
-        let res2 = tool.execute(json!({ "owner": "test", "repo": "repo", "title": "feat", "head": "feature" })).await;
+        let res2 = tool
+            .execute(json!({ "owner": "test", "repo": "repo", "title": "feat", "head": "feature" }))
+            .await;
         assert!(res2.contains("Error: Missing required argument 'base'"));
     }
 }
