@@ -1,5 +1,6 @@
 pub mod api;
 pub mod tools;
 pub mod unity_tools;
+pub mod godot_tools;
 pub mod web_tools;
 pub mod github_tools;

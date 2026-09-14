@@ -145,6 +145,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let args: Vec<String> = env::args().collect();
     let enable_unity = args.contains(&"--unity".to_string());
+    let enable_godot = args.contains(&"--godot".to_string());
     let enable_web = args.contains(&"--web".to_string());
     let enable_github = args.contains(&"--github".to_string()) || env::var("GITHUB_TOKEN").is_ok();
 
@@ -180,6 +181,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
             ))
             .with_tool(std::sync::Arc::new(
                 rune::unity_tools::UnityReadConsoleLogsTool::new(),
+            ))
+    }
+
+    if enable_godot {
+        println!("{}", "Godot editor tools enabled.".cyan());
+        agent = agent
+            .with_tool(std::sync::Arc::new(
+                rune::godot_tools::GodotInspectSceneTool::new(),
+            ))
+            .with_tool(std::sync::Arc::new(
+                rune::godot_tools::GodotInspectNodePropertiesTool::new(),
+            ))
+            .with_tool(std::sync::Arc::new(
+                rune::godot_tools::GodotCreateNodeTool::new(),
             ))
     }
 
@@ -467,6 +482,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     println!(
                         "  - {:<18} : Create a new GitHub pull request (requires confirmation) (with --github)",
                         "github_create_pull_request".green()
+                    );
+                    println!(
+                        "  - {:<18} : Inspect active Godot scene hierarchy (with --godot)",
+                        "godot_inspect_scene".green()
+                    );
+                    println!(
+                        "  - {:<18} : Inspect Godot node properties (with --godot)",
+                        "godot_inspect_node_properties".green()
+                    );
+                    println!(
+                        "  - {:<18} : Create a new Godot node (requires confirmation) (with --godot)",
+                        "godot_create_node".green()
                     );
                     continue;
                 }
