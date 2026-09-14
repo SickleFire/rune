@@ -148,6 +148,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let enable_godot = args.contains(&"--godot".to_string());
     let enable_web = args.contains(&"--web".to_string());
     let enable_github = args.contains(&"--github".to_string()) || env::var("GITHUB_TOKEN").is_ok();
+    let enable_mysql = args.contains(&"--mysql".to_string());
 
     if enable_unity {
         println!("{}", "Unity editor tools enabled.".cyan());
@@ -223,6 +224,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
             ))
             .with_tool(std::sync::Arc::new(
                 rune::github_tools::GitHubCreatePullRequestTool::new(),
+            ))
+    }
+
+    if enable_mysql {
+        println!("{}", "MySQL database tools enabled.".cyan());
+        let mysql_url = env::var("MYSQL_URL").ok();
+        agent = agent
+            .with_tool(std::sync::Arc::new(
+                rune::mysql_tools::MysqlListTablesTool::new(mysql_url.clone()),
+            ))
+            .with_tool(std::sync::Arc::new(
+                rune::mysql_tools::MysqlDescribeTableTool::new(mysql_url.clone()),
+            ))
+            .with_tool(std::sync::Arc::new(
+                rune::mysql_tools::MysqlExecuteQueryTool::new(mysql_url),
             ))
     }
 
@@ -510,6 +526,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     println!(
                         "  - {:<18} : Create a new GitHub pull request (requires confirmation) (with --github)",
                         "github_create_pull_request".green()
+                    );
+                    println!(
+                        "  - {:<18} : List all tables in XAMPP MySQL database (with --mysql)",
+                        "mysql_list_tables".green()
+                    );
+                    println!(
+                        "  - {:<18} : Describe schema and columns of a MySQL table (with --mysql)",
+                        "mysql_describe_table".green()
+                    );
+                    println!(
+                        "  - {:<18} : Execute SQL queries against MySQL database (with --mysql)",
+                        "mysql_execute_query".green()
                     );
                     println!(
                         "  - {:<18} : Inspect active Godot scene hierarchy (with --godot)",

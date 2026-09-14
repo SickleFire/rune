@@ -7,6 +7,7 @@ Rune is an expert AI coding assistant integrated into a software development wor
 - **Interactive REPL & CLI**: Powered by `rustyline` with colorized output and prompt support.
 - **Tool Execution Framework**: Rich set of built-in tools for workspace inspection, file reading/writing/patching, executing shell commands, and git operations.
 - **Web Utility Tools**: Built-in HTTP request execution (`http_request`), web page scraping/fetching (`fetch_web_page`), and TCP port verification (`check_tcp_port`).
+- **MySQL Database Tools**: Optional MySQL integration (`--mysql`) supporting listing tables (`mysql_list_tables`), describing table schemas (`mysql_describe_table`), and executing SQL queries (`mysql_execute_query`).
 - **GitHub Integration**: Optional GitHub integration (`--github` flag or `GITHUB_TOKEN`) supporting reading issues & PR diffs, creating issues, posting comments, and opening pull requests.
 - **Unity Editor Integration**: Optional Unity Bridge (`--unity` flag) supporting scene inspection, game object/component management, asset searching, reference validation, console log reading, and play mode control.
 - **Godot Editor Integration**: Optional Godot Bridge (`--godot` flag) supporting active scene inspection (`godot_inspect_scene`), node property auditing (`godot_inspect_node_properties`), and node creation (`godot_create_node`).
@@ -22,6 +23,7 @@ Rune is an expert AI coding assistant integrated into a software development wor
 - `src/api.rs`: API communication layer with LLM endpoints, request payload formatting, and response parsing.
 - `src/tools.rs`: Tool definitions, execution logic, workspace security validations, and utility functions.
 - `src/web_tools.rs`: Web utility tools for HTTP REST requests, webpage fetching & HTML text extraction, and TCP port checks.
+- `src/mysql_tools.rs`: MySQL database tools for listing tables, describing table schemas, and executing queries against MySQL databases (such as XAMPP MySQL).
 - `src/unity_tools.rs`: Unity Editor bridge tools for inspecting scenes, managing GameObjects/components, assets, and console logs.
 - `src/godot_tools.rs`: Godot Editor bridge tools for inspecting active scene hierarchies, auditing node properties, and creating nodes.
 - `unity/RuneBridge.cs`: C# Unity Editor integration script providing HTTP bridge endpoints for Rune's Unity tools.
@@ -65,6 +67,12 @@ To run with Godot Editor bridge integration enabled:
 
 ```bash
 cargo run -- --godot
+```
+
+To run with MySQL database tools enabled:
+
+```bash
+cargo run -- --mysql
 ```
 
 Or pass prompts directly via CLI arguments for quick tasks and automation scripts.
