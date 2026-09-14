@@ -73,7 +73,8 @@ impl AgentTool for GitHubIssueTool {
             {
                 Some(n) => n,
                 None => {
-                    return "Error: Missing or invalid required argument 'issue_number'".to_string();
+                    return "Error: Missing or invalid required argument 'issue_number'"
+                        .to_string();
                 }
             },
         };
@@ -530,7 +531,8 @@ impl AgentTool for GitHubCreateCommentTool {
             {
                 Some(n) => n,
                 None => {
-                    return "Error: Missing or invalid required argument 'issue_number'".to_string();
+                    return "Error: Missing or invalid required argument 'issue_number'"
+                        .to_string();
                 }
             },
         };
