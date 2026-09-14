@@ -349,7 +349,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     let model = parts
                                         .get(2)
                                         .map(|s| s.to_string())
-                                        .unwrap_or_else(|| "gemini-3.5-flash-lit".into());
+                                        .unwrap_or_else(|| "gemini-3.5-flash-lite".into());
                                     let provider =
                                         std::sync::Arc::new(rune::api::GeminiProvider::new(
                                             gemini_api_key.clone(),
