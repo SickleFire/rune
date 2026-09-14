@@ -9,6 +9,7 @@ Rune is an expert AI coding assistant integrated into a software development wor
 - **Web Utility Tools**: Built-in HTTP request execution (`http_request`), web page scraping/fetching (`fetch_web_page`), and TCP port verification (`check_tcp_port`).
 - **GitHub Integration**: Optional GitHub integration (`--github` flag or `GITHUB_TOKEN`) supporting reading issues & PR diffs, creating issues, posting comments, and opening pull requests.
 - **Unity Editor Integration**: Optional Unity Bridge (`--unity` flag) supporting scene inspection, game object/component management, asset searching, reference validation, console log reading, and play mode control.
+- **Godot Editor Integration**: Optional Godot Bridge (`--godot` flag) supporting active scene inspection (`godot_inspect_scene`), node property auditing (`godot_inspect_node_properties`), and node creation (`godot_create_node`).
 - **Async API Client**: Robust integration with LLM APIs supporting tool calling and streaming responses.
 - **Smart Context**: Global awareness of repository architecture and file systems.
 - **Code Search Engine (cix)**: Fast symbol and pattern searching across the repository.
@@ -22,7 +23,9 @@ Rune is an expert AI coding assistant integrated into a software development wor
 - `src/tools.rs`: Tool definitions, execution logic, workspace security validations, and utility functions.
 - `src/web_tools.rs`: Web utility tools for HTTP REST requests, webpage fetching & HTML text extraction, and TCP port checks.
 - `src/unity_tools.rs`: Unity Editor bridge tools for inspecting scenes, managing GameObjects/components, assets, and console logs.
+- `src/godot_tools.rs`: Godot Editor bridge tools for inspecting active scene hierarchies, auditing node properties, and creating nodes.
 - `unity/RuneBridge.cs`: C# Unity Editor integration script providing HTTP bridge endpoints for Rune's Unity tools.
+- `godot/`: Godot C# plugin integration (`RuneBridge.cs`, `RuneBridgePlugin.cs`, `plugin.cfg`) providing HTTP bridge endpoints for Rune's Godot tools.
 
 ## Getting Started
 
@@ -56,6 +59,12 @@ To run with Unity Editor bridge integration enabled:
 
 ```bash
 cargo run -- --unity
+```
+
+To run with Godot Editor bridge integration enabled:
+
+```bash
+cargo run -- --godot
 ```
 
 Or pass prompts directly via CLI arguments for quick tasks and automation scripts.
