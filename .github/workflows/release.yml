@@ -62,9 +62,9 @@ jobs:
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/rune dist/
-          cp README.md LICENSE.md dist/
+          cp README.md LICENSE.md install.sh dist/
           cd dist
-          tar -czvf ../${{ matrix.archive_name }} rune README.md LICENSE.md
+          tar -czvf ../${{ matrix.archive_name }} rune README.md LICENSE.md install.sh
           cd ..
 
       - name: Package artifacts (Windows)
@@ -73,9 +73,9 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist
           Copy-Item target/${{ matrix.target }}/release/rune.exe dist/
-          Copy-Item README.md, LICENSE.md dist/
+          Copy-Item README.md, LICENSE.md, install.sh dist/
           cd dist
-          Compress-Archive -Path rune.exe, README.md, LICENSE.md -DestinationPath ../${{ matrix.archive_name }}
+          Compress-Archive -Path rune.exe, README.md, LICENSE.md, install.sh -DestinationPath ../${{ matrix.archive_name }}
           cd ..
 
       - name: Upload Release Asset
