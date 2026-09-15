@@ -22,6 +22,7 @@ pub trait AgentTool: Send + Sync {
 pub struct ToolExecutor {
     workspace_root: PathBuf,
     last_checkpoint: Mutex<Option<String>>,
+    restricted_patterns: Vec<String>,
 }
 
 impl ToolExecutor {
@@ -29,10 +30,39 @@ impl ToolExecutor {
         Self {
             workspace_root,
             last_checkpoint: Mutex::new(None),
+            restricted_patterns: vec![
+                ".env".to_string(),
+                "secrets/".to_string(),
+                "id_rsa".to_string(),
+                ".pem".to_string(),
+                "credentials".to_string(),
+            ],
         }
     }
 
+    pub fn with_restricted_patterns(mut self, patterns: Vec<String>) -> Self {
+        self.restricted_patterns = patterns;
+        self
+    }
+
+    pub fn check_guardrails(&self, path: &Path) -> io::Result<()> {
+        let path_str = path.to_string_lossy().replace('\\', "/");
+        for pattern in &self.restricted_patterns {
+            if path_str.contains(pattern) || path_str.starts_with(pattern) {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    format!(
+                        "Policy Guardrail Violation: Access to restricted path or pattern '{}' is prohibited.",
+                        pattern
+                    ),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub fn sanitize_path(&self, user_path: &Path) -> io::Result<PathBuf> {
+        self.check_guardrails(user_path)?;
         let canonical_workspace = dunce::canonicalize(&self.workspace_root)?;
 
         if user_path.is_absolute() {
@@ -392,6 +422,26 @@ impl ToolExecutor {
     }
 
     pub async fn execute_commands(&self, cmd: &str) -> Result<String, std::io::Error> {
+        let cmd_lower = cmd.to_lowercase();
+        let dangerous_keywords = [
+            "rm -rf /",
+            "drop database",
+            "mkfs",
+            "> /dev/sda",
+            ":(){ :|:& };:",
+        ];
+        for kw in &dangerous_keywords {
+            if cmd_lower.contains(kw) {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    format!(
+                        "Policy Guardrail Violation: Destructive command pattern '{}' is blocked by security guardrails.",
+                        kw
+                    ),
+                ));
+            }
+        }
+
         let canonical_workspace = dunce::canonicalize(&self.workspace_root)?;
 
         #[cfg(target_os = "windows")]
@@ -637,6 +687,24 @@ impl ToolExecutor {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn test_sanitize_path_restricted_pattern() {
+        let dir = tempdir().unwrap();
+        let executor = ToolExecutor::new(dir.path().to_path_buf());
+        let res = executor.sanitize_path(Path::new(".env"));
+        assert!(res.is_err());
+        let res2 = executor.sanitize_path(Path::new("secrets/db_password.txt"));
+        assert!(res2.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_destructive_command_guardrail() {
+        let dir = tempdir().unwrap();
+        let executor = ToolExecutor::new(dir.path().to_path_buf());
+        let res = executor.execute_commands("rm -rf /").await;
+        assert!(res.is_err());
+    }
 
     #[test]
     fn test_sanitize_path_normal() {
