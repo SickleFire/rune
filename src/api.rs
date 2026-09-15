@@ -887,6 +887,88 @@ impl Agent {
             }
 
             if plan_mode {
+                let (read_only, mutating): (Vec<_>, Vec<_>) = tool_calls
+                    .into_iter()
+                    .partition(|tc| self.is_read_only_tool(&tc.name));
+
+                if !read_only.is_empty() {
+                    let executor = &self.executor;
+                    let ro_dynamic: HashMap<String, Arc<dyn AgentTool>> = read_only
+                        .iter()
+                        .filter_map(|tc| {
+                            self.dynamic_tools
+                                .get(&tc.name)
+                                .map(|t| (tc.name.clone(), Arc::clone(t)))
+                        })
+                        .collect();
+
+                    let futures = read_only.into_iter().map(|tc| {
+                        let ro_dynamic = ro_dynamic.clone();
+                        println!("\n[Plan Mode: Executing read-only tool: {}]", tc.name);
+                        async move {
+                            let output = if let Some(tool) = ro_dynamic.get(&tc.name) {
+                                tool.execute(tc.args.clone()).await
+                            } else {
+                                match tc.name.as_str() {
+                                    "list_files" => {
+                                        let p = tc.args["path"].as_str().unwrap_or(".");
+                                        executor
+                                            .list_files(Path::new(p))
+                                            .await
+                                            .unwrap_or_else(|e| e.to_string())
+                                    }
+                                    "read_file" => {
+                                        let p = tc.args["path"].as_str().unwrap_or("");
+                                        executor
+                                            .read_file(Path::new(p))
+                                            .await
+                                            .unwrap_or_else(|e| e.to_string())
+                                    }
+                                    "search_code" => {
+                                        let q = tc.args["query"].as_str().unwrap_or("");
+                                        executor
+                                            .search_code(q)
+                                            .await
+                                            .unwrap_or_else(|e| e.to_string())
+                                    }
+                                    "search_symbol" => {
+                                        let q = tc.args["query"].as_str().unwrap_or("");
+                                        executor
+                                            .search_symbol(q)
+                                            .await
+                                            .unwrap_or_else(|e| e.to_string())
+                                    }
+                                    "git_status" => executor
+                                        .git_status()
+                                        .await
+                                        .unwrap_or_else(|e| e.to_string()),
+                                    "git_diff" => executor
+                                        .git_diff(tc.args["path"].as_str())
+                                        .await
+                                        .unwrap_or_else(|e| e.to_string()),
+                                    _ => format!("Unknown read-only tool: {}", tc.name),
+                                }
+                            };
+                            CanonicalToolResult {
+                                tool_call_id: tc.id,
+                                name: tc.name,
+                                content: output,
+                            }
+                        }
+                    });
+
+                    let ro_results = futures_util::future::join_all(futures).await;
+                    for result in ro_results {
+                        self.history.push(CanonicalMessage::ToolResult(result));
+                    }
+                    continue;
+                }
+
+                if !mutating.is_empty() {
+                    println!("\n{}", "[Plan Mode Active: Mutating tool calls suppressed. Review the plan above and switch to execute mode (/execute) to run actions.]".cyan().bold());
+                    break;
+                }
+
                 println!("\n{}", "[Plan Mode Active: Tool calls suppressed. Review the plan above and switch to execute mode (/execute) to run actions.]".cyan().bold());
                 break;
             }
