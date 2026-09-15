@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*' # Triggered on any tag starting with v, e.g., v0.1.0
 
+permissions:
+  contents: write
+
 jobs:
   create-release:
     name: Create GitHub Release
@@ -27,6 +30,8 @@ jobs:
     name: Build & Package (${{ matrix.os }})
     needs: create-release
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     strategy:
       matrix:
         include:
