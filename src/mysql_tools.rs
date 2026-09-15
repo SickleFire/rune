@@ -12,7 +12,8 @@ pub struct MysqlListTablesTool {
 impl MysqlListTablesTool {
     pub fn new(connection_url: Option<String>) -> Self {
         Self {
-            connection_url: connection_url.unwrap_or_else(|| "mysql://root:@localhost:3306/test".to_string()),
+            connection_url: connection_url
+                .unwrap_or_else(|| "mysql://root:@localhost:3306/test".to_string()),
         }
     }
 }
@@ -42,7 +43,11 @@ impl AgentTool for MysqlListTablesTool {
             .await
         {
             Ok(p) => p,
-            Err(e) => return format!("MySQL Connection Error: {e} (Ensure XAMPP MySQL is running on port 3306)"),
+            Err(e) => {
+                return format!(
+                    "MySQL Connection Error: {e} (Ensure XAMPP MySQL is running on port 3306)"
+                );
+            }
         };
 
         let query = "SHOW TABLES;";
@@ -70,7 +75,8 @@ pub struct MysqlExecuteQueryTool {
 impl MysqlExecuteQueryTool {
     pub fn new(connection_url: Option<String>) -> Self {
         Self {
-            connection_url: connection_url.unwrap_or_else(|| "mysql://root:@localhost:3306/test".to_string()),
+            connection_url: connection_url
+                .unwrap_or_else(|| "mysql://root:@localhost:3306/test".to_string()),
         }
     }
 }
@@ -122,12 +128,18 @@ impl AgentTool for MysqlExecuteQueryTool {
                         // Try parsing as string, fallback to debug or null
                         let val: Result<String, _> = row.try_get(col_name);
                         match val {
-                            Ok(v) => { map.insert(col_name.to_string(), Value::String(v)); }
+                            Ok(v) => {
+                                map.insert(col_name.to_string(), Value::String(v));
+                            }
                             Err(_) => {
                                 let int_val: Result<i64, _> = row.try_get(col_name);
                                 match int_val {
-                                    Ok(i) => { map.insert(col_name.to_string(), Value::Number(i.into())); }
-                                    Err(_) => { map.insert(col_name.to_string(), Value::Null); }
+                                    Ok(i) => {
+                                        map.insert(col_name.to_string(), Value::Number(i.into()));
+                                    }
+                                    Err(_) => {
+                                        map.insert(col_name.to_string(), Value::Null);
+                                    }
                                 }
                             }
                         }
@@ -139,7 +151,10 @@ impl AgentTool for MysqlExecuteQueryTool {
             Err(e) => {
                 // Try execute for non-SELECT statements (INSERT, UPDATE, DELETE, CREATE)
                 match sqlx::query(sql).execute(&pool).await {
-                    Ok(res) => format!("Query executed successfully. Rows affected: {}", res.rows_affected()),
+                    Ok(res) => format!(
+                        "Query executed successfully. Rows affected: {}",
+                        res.rows_affected()
+                    ),
                     Err(exec_err) => format!("MySQL Execution Error: {e} | Exec Error: {exec_err}"),
                 }
             }
@@ -154,7 +169,8 @@ pub struct MysqlDescribeTableTool {
 impl MysqlDescribeTableTool {
     pub fn new(connection_url: Option<String>) -> Self {
         Self {
-            connection_url: connection_url.unwrap_or_else(|| "mysql://root:@localhost:3306/test".to_string()),
+            connection_url: connection_url
+                .unwrap_or_else(|| "mysql://root:@localhost:3306/test".to_string()),
         }
     }
 }
@@ -164,7 +180,8 @@ impl AgentTool for MysqlDescribeTableTool {
     fn declaration(&self) -> FunctionDeclaration {
         FunctionDeclaration {
             name: "mysql_describe_table".to_string(),
-            description: "Describe table schema, columns, types, and keys for a MySQL table.".to_string(),
+            description: "Describe table schema, columns, types, and keys for a MySQL table."
+                .to_string(),
             parameters: json!({
                 "type": "OBJECT",
                 "properties": {
@@ -226,11 +243,14 @@ mod tests {
     #[tokio::test]
     async fn test_mysql_tools_offline() {
         // Test offline execution behavior when XAMPP MySQL is not running
-        let list_tool = MysqlListTablesTool::new(Some("mysql://root:@localhost:3306/nonexistent".to_string()));
+        let list_tool =
+            MysqlListTablesTool::new(Some("mysql://root:@localhost:3306/nonexistent".to_string()));
         let res = list_tool.execute(json!({})).await;
         assert!(res.contains("MySQL Connection Error"));
 
-        let query_tool = MysqlExecuteQueryTool::new(Some("mysql://root:@localhost:3306/nonexistent".to_string()));
+        let query_tool = MysqlExecuteQueryTool::new(Some(
+            "mysql://root:@localhost:3306/nonexistent".to_string(),
+        ));
         let res2 = query_tool.execute(json!({ "query": "SELECT 1" })).await;
         assert!(res2.contains("MySQL Connection Error"));
     }

@@ -17,7 +17,8 @@ impl AgentTool for DockerListContainersTool {
     fn declaration(&self) -> FunctionDeclaration {
         FunctionDeclaration {
             name: "docker_list_containers".to_string(),
-            description: "List Docker containers (running and/or stopped) using `docker ps`.".to_string(),
+            description: "List Docker containers (running and/or stopped) using `docker ps`."
+                .to_string(),
             parameters: json!({
                 "type": "OBJECT",
                 "properties": {
@@ -57,7 +58,9 @@ impl AgentTool for DockerListContainersTool {
                     format!("Docker Error (Exit Code {}):\n{}", output.status, stderr)
                 }
             }
-            Err(e) => format!("Failed to execute 'docker ps': {e}. Ensure Docker CLI is installed and running."),
+            Err(e) => format!(
+                "Failed to execute 'docker ps': {e}. Ensure Docker CLI is installed and running."
+            ),
         }
     }
 }
@@ -125,7 +128,10 @@ impl AgentTool for DockerContainerLogsTool {
                         combined
                     }
                 } else {
-                    format!("Docker Logs Error (Exit Code {}):\n{}", output.status, combined)
+                    format!(
+                        "Docker Logs Error (Exit Code {}):\n{}",
+                        output.status, combined
+                    )
                 }
             }
             Err(e) => format!("Failed to execute 'docker logs': {e}"),
@@ -146,7 +152,8 @@ impl AgentTool for DockerStartContainerTool {
     fn declaration(&self) -> FunctionDeclaration {
         FunctionDeclaration {
             name: "docker_start_container".to_string(),
-            description: "Start one or more stopped Docker containers using `docker start`.".to_string(),
+            description: "Start one or more stopped Docker containers using `docker start`."
+                .to_string(),
             parameters: json!({
                 "type": "OBJECT",
                 "properties": {
@@ -170,14 +177,24 @@ impl AgentTool for DockerStartContainerTool {
             None => return "Error: Missing required argument 'container'".to_string(),
         };
 
-        match Command::new("docker").args(["start", container]).output().await {
+        match Command::new("docker")
+            .args(["start", container])
+            .output()
+            .await
+        {
             Ok(output) => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 if output.status.success() {
-                    format!("Successfully started container '{}'.\n{}", container, stdout)
+                    format!(
+                        "Successfully started container '{}'.\n{}",
+                        container, stdout
+                    )
                 } else {
-                    format!("Docker Start Error (Exit Code {}):\n{}", output.status, stderr)
+                    format!(
+                        "Docker Start Error (Exit Code {}):\n{}",
+                        output.status, stderr
+                    )
                 }
             }
             Err(e) => format!("Failed to execute 'docker start': {e}"),
@@ -240,9 +257,15 @@ impl AgentTool for DockerStopContainerTool {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 if output.status.success() {
-                    format!("Successfully stopped container '{}'.\n{}", container, stdout)
+                    format!(
+                        "Successfully stopped container '{}'.\n{}",
+                        container, stdout
+                    )
                 } else {
-                    format!("Docker Stop Error (Exit Code {}):\n{}", output.status, stderr)
+                    format!(
+                        "Docker Stop Error (Exit Code {}):\n{}",
+                        output.status, stderr
+                    )
                 }
             }
             Err(e) => format!("Failed to execute 'docker stop': {e}"),
@@ -288,7 +311,10 @@ impl AgentTool for DockerListImagesTool {
                         stdout.to_string()
                     }
                 } else {
-                    format!("Docker Images Error (Exit Code {}):\n{}", output.status, stderr)
+                    format!(
+                        "Docker Images Error (Exit Code {}):\n{}",
+                        output.status, stderr
+                    )
                 }
             }
             Err(e) => format!("Failed to execute 'docker images': {e}"),
@@ -333,14 +359,21 @@ impl AgentTool for DockerInspectContainerTool {
             None => return "Error: Missing required argument 'container'".to_string(),
         };
 
-        match Command::new("docker").args(["inspect", container]).output().await {
+        match Command::new("docker")
+            .args(["inspect", container])
+            .output()
+            .await
+        {
             Ok(output) => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 if output.status.success() {
                     stdout.to_string()
                 } else {
-                    format!("Docker Inspect Error (Exit Code {}):\n{}", output.status, stderr)
+                    format!(
+                        "Docker Inspect Error (Exit Code {}):\n{}",
+                        output.status, stderr
+                    )
                 }
             }
             Err(e) => format!("Failed to execute 'docker inspect': {e}"),

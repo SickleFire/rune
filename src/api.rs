@@ -1,7 +1,7 @@
-use colored::*;
 use crate::tools::AgentTool;
 use crate::tools::ToolExecutor;
 use async_trait::async_trait;
+use colored::*;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -241,24 +241,39 @@ impl LLMProvider for GeminiProvider {
             attempt += 1;
             let res = self.client.post(&url).json(&request).send().await;
             match res {
-                Ok(resp) if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS || resp.status().is_server_error() => {
+                Ok(resp)
+                    if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
+                        || resp.status().is_server_error() =>
+                {
                     if attempt >= max_retries {
                         let status = resp.status();
                         let body = resp.text().await.unwrap_or_default();
                         return Err(format!("Gemini API rate limit or server error after {max_retries} attempts ({status}): {body}").into());
                     }
                     let jitter = (std::time::Instant::now().elapsed().subsec_nanos() % 500) as u64;
-                    let backoff = std::time::Duration::from_secs(2u64.pow(attempt - 1)) + std::time::Duration::from_millis(jitter);
-                    eprintln!("\n[Rune: Rate limited (status {}). Retrying Gemini API in {:?} (attempt {}/{max_retries})...]", resp.status(), backoff, attempt);
+                    let backoff = std::time::Duration::from_secs(2u64.pow(attempt - 1))
+                        + std::time::Duration::from_millis(jitter);
+                    eprintln!(
+                        "\n[Rune: Rate limited (status {}). Retrying Gemini API in {:?} (attempt {}/{max_retries})...]",
+                        resp.status(),
+                        backoff,
+                        attempt
+                    );
                     tokio::time::sleep(backoff).await;
                 }
                 Ok(resp) => break resp,
                 Err(e) => {
                     if attempt >= max_retries {
-                        return Err(format!("Gemini API network error after {max_retries} attempts: {e}").into());
+                        return Err(format!(
+                            "Gemini API network error after {max_retries} attempts: {e}"
+                        )
+                        .into());
                     }
                     let backoff = std::time::Duration::from_secs(2u64.pow(attempt - 1));
-                    eprintln!("\n[Rune: Network error ({e}). Retrying Gemini API in {:?} (attempt {}/{max_retries})...]", backoff, attempt);
+                    eprintln!(
+                        "\n[Rune: Network error ({e}). Retrying Gemini API in {:?} (attempt {}/{max_retries})...]",
+                        backoff, attempt
+                    );
                     tokio::time::sleep(backoff).await;
                 }
             }
@@ -534,24 +549,39 @@ impl LLMProvider for OpenAIProvider {
                 .await;
 
             match res {
-                Ok(resp) if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS || resp.status().is_server_error() => {
+                Ok(resp)
+                    if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
+                        || resp.status().is_server_error() =>
+                {
                     if attempt >= max_retries {
                         let status = resp.status();
                         let body = resp.text().await.unwrap_or_default();
                         return Err(format!("OpenAI API rate limit or server error after {max_retries} attempts ({status}): {body}").into());
                     }
                     let jitter = (std::time::Instant::now().elapsed().subsec_nanos() % 500) as u64;
-                    let backoff = std::time::Duration::from_secs(2u64.pow(attempt - 1)) + std::time::Duration::from_millis(jitter);
-                    eprintln!("\n[Rune: Rate limited (status {}). Retrying OpenAI API in {:?} (attempt {}/{max_retries})...]", resp.status(), backoff, attempt);
+                    let backoff = std::time::Duration::from_secs(2u64.pow(attempt - 1))
+                        + std::time::Duration::from_millis(jitter);
+                    eprintln!(
+                        "\n[Rune: Rate limited (status {}). Retrying OpenAI API in {:?} (attempt {}/{max_retries})...]",
+                        resp.status(),
+                        backoff,
+                        attempt
+                    );
                     tokio::time::sleep(backoff).await;
                 }
                 Ok(resp) => break resp,
                 Err(e) => {
                     if attempt >= max_retries {
-                        return Err(format!("OpenAI API network error after {max_retries} attempts: {e}").into());
+                        return Err(format!(
+                            "OpenAI API network error after {max_retries} attempts: {e}"
+                        )
+                        .into());
                     }
                     let backoff = std::time::Duration::from_secs(2u64.pow(attempt - 1));
-                    eprintln!("\n[Rune: Network error ({e}). Retrying OpenAI API in {:?} (attempt {}/{max_retries})...]", backoff, attempt);
+                    eprintln!(
+                        "\n[Rune: Network error ({e}). Retrying OpenAI API in {:?} (attempt {}/{max_retries})...]",
+                        backoff, attempt
+                    );
                     tokio::time::sleep(backoff).await;
                 }
             }

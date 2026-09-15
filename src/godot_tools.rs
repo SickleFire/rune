@@ -175,15 +175,19 @@ mod tests {
         assert!(res.contains("Godot Bridge Network Error"));
 
         let inspect_node = GodotInspectNodePropertiesTool::new();
-        let res2 = inspect_node.execute(json!({"nodePath": "/root/Player"})).await;
+        let res2 = inspect_node
+            .execute(json!({"nodePath": "/root/Player"}))
+            .await;
         assert!(res2.contains("Godot Bridge Network Error"));
 
         let create_node = GodotCreateNodeTool::new();
-        let res3 = create_node.execute(json!({
-            "parentPath": "/root",
-            "nodeName": "TestNode",
-            "nodeType": "Node"
-        })).await;
+        let res3 = create_node
+            .execute(json!({
+                "parentPath": "/root",
+                "nodeName": "TestNode",
+                "nodeType": "Node"
+            }))
+            .await;
         assert!(res3.contains("Godot Bridge Network Error"));
     }
 

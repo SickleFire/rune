@@ -336,7 +336,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     println!("{}", "Plan mode ENABLED. Rune will propose a detailed execution plan without executing mutating tools.".cyan().bold());
                     let instruction = prompt.strip_prefix("/plan").unwrap_or("").trim();
                     if !instruction.is_empty() {
-                        let plan_prompt = format!("[PLANNING MODE REQUEST] Please formulate a comprehensive, step-by-step execution plan to accomplish the following task without executing mutating tools:\n\n{instruction}");
+                        let plan_prompt = format!(
+                            "[PLANNING MODE REQUEST] Please formulate a comprehensive, step-by-step execution plan to accomplish the following task without executing mutating tools:\n\n{instruction}"
+                        );
                         agent.run_with_mode(&plan_prompt, false, true).await;
                         println!();
                     }
