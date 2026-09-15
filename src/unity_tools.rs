@@ -443,6 +443,52 @@ impl AgentTool for UnityInstantiatePrefabTool {
     }
 }
 
+pub struct UnityCreateScriptableObjectTool {
+    client: reqwest::Client,
+}
+impl UnityCreateScriptableObjectTool {
+    pub fn new() -> Self {
+        Self {
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(5))
+                .build()
+                .unwrap_or_default(),
+        }
+    }
+}
+#[async_trait]
+impl AgentTool for UnityCreateScriptableObjectTool {
+    fn declaration(&self) -> FunctionDeclaration {
+        FunctionDeclaration {
+            name: "unity_create_scriptable_object".to_string(),
+            description: "Create a new ScriptableObject asset in Unity, optionally based on a preset ScriptableObject asset path.".to_string(),
+            parameters: json!({
+                "type": "OBJECT",
+                "properties": {
+                    "scriptableObjectType": { "type": "STRING", "description": "C# class name of the ScriptableObject" },
+                    "assetPath": { "type": "STRING", "description": "Target asset path (e.g. Assets/Data/NewConfig.asset)" },
+                    "presetAssetPath": { "type": "STRING", "description": "Optional preset ScriptableObject asset path to clone from" }
+                },
+                "required": ["scriptableObjectType", "assetPath"]
+            }),
+        }
+    }
+    fn is_read_only(&self) -> bool {
+        false
+    }
+    fn is_destructive(&self) -> bool {
+        false
+    }
+    async fn execute(&self, args: Value) -> String {
+        let url = format!("{}/scriptable-object/create", BRIDGE_URL);
+        match self.client.post(&url).json(&args).send().await {
+            Ok(res) if res.status().is_success() => res.text().await.unwrap_or_default(),
+            Ok(res) => format!("Unity Bridge Error: HTTP {}", res.status()),
+            Err(e) => format!("Unity Bridge Network Error: {e}"),
+        }
+    }
+}
+
 pub struct UnityFindAssetsTool {
     client: reqwest::Client,
 }
@@ -644,6 +690,10 @@ mod tests {
         let find_assets = UnityFindAssetsTool::new();
         assert_eq!(find_assets.declaration().name, "unity_find_assets");
         assert!(find_assets.is_read_only());
+
+        let create_so = UnityCreateScriptableObjectTool::new();
+        assert_eq!(create_so.declaration().name, "unity_create_scriptable_object");
+        assert!(!create_so.is_read_only());
     }
 
     #[tokio::test]

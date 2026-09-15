@@ -181,6 +181,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 rune::unity_tools::UnityInstantiatePrefabTool::new(),
             ))
             .with_tool(std::sync::Arc::new(
+                rune::unity_tools::UnityCreateScriptableObjectTool::new(),
+            ))
+            .with_tool(std::sync::Arc::new(
                 rune::unity_tools::UnityRefreshAssetDatabaseTool::new(),
             ))
             .with_tool(std::sync::Arc::new(

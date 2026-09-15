@@ -121,6 +121,10 @@ public static class RuneBridge
             {
                 SendResponse(context, InstantiatePrefab(ReadRequestBody(context)), HttpStatusCode.OK);
             }
+            else if (path == "/scriptable-object/create" && method == "POST")
+            {
+                SendResponse(context, CreateScriptableObject(ReadRequestBody(context)), HttpStatusCode.OK);
+            }
             else if (path == "/asset/find" && method == "GET")
             {
                 string filter = context.Request.QueryString["filter"] ?? "";
@@ -247,6 +251,54 @@ public static class RuneBridge
         GameObject instance = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
         Undo.RegisterCreatedObjectUndo(instance, $"Rune Instantiate {instance.name}");
         return $"{{\"status\":\"success\",\"objectName\":\"{EscapeJsonString(instance.name)}\"}}";
+    }
+
+    [Serializable]
+    private struct CreateScriptableObjectPayload
+    {
+        public string scriptableObjectType;
+        public string assetPath;
+        public string presetAssetPath;
+    }
+
+    private static string CreateScriptableObject(string jsonPayload)
+    {
+        CreateScriptableObjectPayload payload = JsonUtility.FromJson<CreateScriptableObjectPayload>(jsonPayload);
+        if (string.IsNullOrEmpty(payload.scriptableObjectType) || string.IsNullOrEmpty(payload.assetPath))
+        {
+            return "{\"status\":\"error\",\"message\":\"Missing 'scriptableObjectType' or 'assetPath'\"}";
+        }
+
+        Type soType = ResolveType(payload.scriptableObjectType);
+        if (soType == null || !typeof(ScriptableObject).IsAssignableFrom(soType))
+        {
+            return $"{{\"status\":\"error\",\"message\":\"ScriptableObject type '{EscapeJsonString(payload.scriptableObjectType)}' not found or invalid\"}}";
+        }
+
+        ScriptableObject soInstance;
+        if (!string.IsNullOrEmpty(payload.presetAssetPath))
+        {
+            ScriptableObject preset = AssetDatabase.LoadAssetAtPath<ScriptableObject>(payload.presetAssetPath);
+            if (preset != null)
+            {
+                soInstance = UnityEngine.Object.Instantiate(preset);
+            }
+            else
+            {
+                soInstance = ScriptableObject.CreateInstance(soType);
+            }
+        }
+        else
+        {
+            soInstance = ScriptableObject.CreateInstance(soType);
+        }
+
+        AssetDatabase.CreateAsset(soInstance, payload.assetPath);
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
+
+        string guid = AssetDatabase.AssetPathToGUID(payload.assetPath);
+        return $"{{\"status\":\"success\",\"assetPath\":\"{EscapeJsonString(payload.assetPath)}\",\"guid\":\"{guid}\"}}";
     }
 
     private static string FindAssets(string filter)
