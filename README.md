@@ -1,7 +1,7 @@
 # Rune
 
-[![CI](https://github.com/username/rune/actions/workflows/ci.yml/badge.svg)](https://github.com/username/rune/actions/workflows/ci.yml)
-[![Release](https://github.com/username/rune/actions/workflows/release.yml/badge.svg)](https://github.com/username/rune/actions/workflows/release.yml)
+[![CI](https://github.com/SickleFire/rune/actions/workflows/ci.yml/badge.svg)](https://github.com/your-github-username/rune/actions/workflows/ci.yml)
+[![Release](https://github.com/SickleFire/rune/actions/workflows/release.yml/badge.svg)](https://github.com/your-github-username/rune/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.md)
 
 Rune is an expert AI coding assistant integrated into a software development workspace and Unity game development environment, built in Rust. It provides an interactive REPL/CLI interface, tool execution (file operations, command execution, git operations, code searching, Unity Editor integration, web utilities), and seamless API integration with LLM providers.
