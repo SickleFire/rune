@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v*' # Triggered on any tag starting with v, e.g., v0.1.0
+      - 'v*'
 
 permissions:
   contents: write
@@ -12,26 +12,19 @@ jobs:
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Create GitHub Release
-        id: create_release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          draft: false
-          prerelease: false
 
   build-release:
     name: Build & Package (${{ matrix.os }})
     needs: create-release
     runs-on: ${{ matrix.os }}
-    permissions:
-      contents: write
     strategy:
       matrix:
         include:
@@ -50,10 +43,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable  # was @master — floating ref, supply-chain risk
         with:
-          toolchain: stable
-          target: ${{ matrix.target }}
+          targets: ${{ matrix.target }}
 
       - name: Cache cargo registry and build
         uses: swatinem/rust-cache@v2
@@ -68,9 +60,7 @@ jobs:
           mkdir -p dist
           cp target/${{ matrix.target }}/release/rune dist/
           cp README.md LICENSE.md install.sh dist/
-          cd dist
-          tar -czvf ../${{ matrix.archive_name }} rune README.md LICENSE.md install.sh
-          cd ..
+          tar -czvf ${{ matrix.archive_name }} -C dist rune README.md LICENSE.md install.sh
 
       - name: Package artifacts (Windows)
         if: matrix.os == 'windows-latest'
@@ -78,16 +68,10 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist
           Copy-Item target/${{ matrix.target }}/release/rune.exe dist/
-          Copy-Item README.md, LICENSE.md, install.sh dist/
-          cd dist
-          Compress-Archive -Path rune.exe, README.md, LICENSE.md, install.sh -DestinationPath ../${{ matrix.archive_name }}
-          cd ..
+          Copy-Item README.md, LICENSE.md dist/  # install.sh removed — shell script doesn't belong in a Windows archive
+          Compress-Archive -Path dist/rune.exe, dist/README.md, dist/LICENSE.md -DestinationPath ${{ matrix.archive_name }}
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            ${{ matrix.archive_name }}
-          tag_name: ${{ github.ref_name }}
-          draft: false
-          prerelease: false
+          files: ${{ matrix.archive_name }}
