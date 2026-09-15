@@ -155,3 +155,51 @@ impl AgentTool for GodotCreateNodeTool {
         false
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_godot_tools_missing_args() {
+        let inspect_node = GodotInspectNodePropertiesTool::new();
+        let res = inspect_node.execute(json!({})).await;
+        assert_eq!(res, "Error: Missing 'nodePath' argument");
+    }
+
+    #[tokio::test]
+    async fn test_godot_tools_offline() {
+        // Test offline error handling when Godot bridge is not running
+        let inspect_scene = GodotInspectSceneTool::new();
+        let res = inspect_scene.execute(json!({})).await;
+        assert!(res.contains("Godot Bridge Network Error"));
+
+        let inspect_node = GodotInspectNodePropertiesTool::new();
+        let res2 = inspect_node.execute(json!({"nodePath": "/root/Player"})).await;
+        assert!(res2.contains("Godot Bridge Network Error"));
+
+        let create_node = GodotCreateNodeTool::new();
+        let res3 = create_node.execute(json!({
+            "parentPath": "/root",
+            "nodeName": "TestNode",
+            "nodeType": "Node"
+        })).await;
+        assert!(res3.contains("Godot Bridge Network Error"));
+    }
+
+    #[test]
+    fn test_godot_tool_declarations_and_properties() {
+        let t1 = GodotInspectSceneTool::new();
+        assert_eq!(t1.declaration().name, "godot_inspect_scene");
+        assert!(t1.is_read_only());
+
+        let t2 = GodotInspectNodePropertiesTool::new();
+        assert_eq!(t2.declaration().name, "godot_inspect_node_properties");
+        assert!(t2.is_read_only());
+
+        let t3 = GodotCreateNodeTool::new();
+        assert_eq!(t3.declaration().name, "godot_create_node");
+        assert!(!t3.is_read_only());
+        assert!(!t3.is_destructive());
+    }
+}

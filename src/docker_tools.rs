@@ -370,4 +370,32 @@ mod tests {
         let res4 = inspect_tool.execute(json!({})).await;
         assert!(res4.contains("Error: Missing required argument 'container'"));
     }
+
+    #[tokio::test]
+    async fn test_docker_tool_declarations_and_properties() {
+        // Validate declarations and is_read_only properties across all docker tools
+        let t1 = DockerListContainersTool::new();
+        assert_eq!(t1.declaration().name, "docker_list_containers");
+        assert!(t1.is_read_only());
+
+        let t2 = DockerContainerLogsTool::new();
+        assert_eq!(t2.declaration().name, "docker_container_logs");
+        assert!(t2.is_read_only());
+
+        let t3 = DockerStartContainerTool::new();
+        assert_eq!(t3.declaration().name, "docker_start_container");
+        assert!(!t3.is_read_only());
+
+        let t4 = DockerStopContainerTool::new();
+        assert_eq!(t4.declaration().name, "docker_stop_container");
+        assert!(!t4.is_read_only());
+
+        let t5 = DockerListImagesTool::new();
+        assert_eq!(t5.declaration().name, "docker_list_images");
+        assert!(t5.is_read_only());
+
+        let t6 = DockerInspectContainerTool::new();
+        assert_eq!(t6.declaration().name, "docker_inspect_container");
+        assert!(t6.is_read_only());
+    }
 }
