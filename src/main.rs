@@ -151,6 +151,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let enable_web = args.contains(&"--web".to_string());
     let enable_github = args.contains(&"--github".to_string()) || env::var("GITHUB_TOKEN").is_ok();
     let enable_mysql = args.contains(&"--mysql".to_string());
+    let enable_docker = args.contains(&"--docker".to_string());
 
     if enable_unity {
         println!("{}", "Unity editor tools enabled.".cyan());
@@ -241,6 +242,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
             ))
             .with_tool(std::sync::Arc::new(
                 rune::mysql_tools::MysqlExecuteQueryTool::new(mysql_url),
+            ))
+    }
+
+    if enable_docker {
+        println!("{}", "Docker container tools enabled.".cyan());
+        agent = agent
+            .with_tool(std::sync::Arc::new(
+                rune::docker_tools::DockerListContainersTool::new(),
+            ))
+            .with_tool(std::sync::Arc::new(
+                rune::docker_tools::DockerContainerLogsTool::new(),
+            ))
+            .with_tool(std::sync::Arc::new(
+                rune::docker_tools::DockerStartContainerTool::new(),
+            ))
+            .with_tool(std::sync::Arc::new(
+                rune::docker_tools::DockerStopContainerTool::new(),
+            ))
+            .with_tool(std::sync::Arc::new(
+                rune::docker_tools::DockerListImagesTool::new(),
+            ))
+            .with_tool(std::sync::Arc::new(
+                rune::docker_tools::DockerInspectContainerTool::new(),
             ))
     }
 
@@ -559,6 +583,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     println!(
                         "  - {:<18} : Execute SQL queries against MySQL database (with --mysql)",
                         "mysql_execute_query".green()
+                    );
+                    println!(
+                        "  - {:<18} : List Docker containers using docker ps (with --docker)",
+                        "docker_list_containers".green()
+                    );
+                    println!(
+                        "  - {:<18} : Fetch container logs using docker logs (with --docker)",
+                        "docker_container_logs".green()
+                    );
+                    println!(
+                        "  - {:<18} : Start a stopped Docker container (requires confirmation) (with --docker)",
+                        "docker_start_container".green()
+                    );
+                    println!(
+                        "  - {:<18} : Stop a running Docker container (requires confirmation) (with --docker)",
+                        "docker_stop_container".green()
+                    );
+                    println!(
+                        "  - {:<18} : List local Docker images (with --docker)",
+                        "docker_list_images".green()
+                    );
+                    println!(
+                        "  - {:<18} : Inspect container configuration and state (with --docker)",
+                        "docker_inspect_container".green()
                     );
                     println!(
                         "  - {:<18} : Inspect active Godot scene hierarchy (with --godot)",

@@ -7,6 +7,7 @@ Rune is an expert AI coding assistant integrated into a software development wor
 - **Interactive REPL & CLI**: Powered by `rustyline` with colorized output and prompt support.
 - **Tool Execution Framework**: Rich set of built-in tools for workspace inspection, file reading/writing/patching, executing shell commands, and git operations.
 - **Web Utility Tools**: Built-in HTTP request execution (`http_request`), web page scraping/fetching (`fetch_web_page`), and TCP port verification (`check_tcp_port`).
+- **Docker Container Tools**: Optional Docker integration (`--docker` flag) supporting container listing (`docker_list_containers`), container logs (`docker_container_logs`), container starting/stopping (`docker_start_container`, `docker_stop_container`), image listing (`docker_list_images`), and container inspection (`docker_inspect_container`).
 - **MySQL Database Tools**: Optional MySQL integration (`--mysql`) supporting listing tables (`mysql_list_tables`), describing table schemas (`mysql_describe_table`), and executing SQL queries (`mysql_execute_query`).
 - **GitHub Integration**: Optional GitHub integration (`--github` flag or `GITHUB_TOKEN`) supporting reading issues & PR diffs, creating issues, posting comments, and opening pull requests.
 - **Unity Editor Integration**: Optional Unity Bridge (`--unity` flag) supporting scene inspection, game object/component management, asset searching, reference validation, console log reading, and play mode control.
@@ -23,6 +24,7 @@ Rune is an expert AI coding assistant integrated into a software development wor
 - `src/api.rs`: API communication layer with LLM endpoints, request payload formatting, and response parsing.
 - `src/tools.rs`: Tool definitions, execution logic, workspace security validations, and utility functions.
 - `src/web_tools.rs`: Web utility tools for HTTP REST requests, webpage fetching & HTML text extraction, and TCP port checks.
+- `src/docker_tools.rs`: Docker container tools for listing containers, viewing logs, starting/stopping containers, listing images, and inspecting container state.
 - `src/mysql_tools.rs`: MySQL database tools for listing tables, describing table schemas, and executing queries against MySQL databases (such as XAMPP MySQL).
 - `src/unity_tools.rs`: Unity Editor bridge tools for inspecting scenes, managing GameObjects/components, assets, and console logs.
 - `src/godot_tools.rs`: Godot Editor bridge tools for inspecting active scene hierarchies, auditing node properties, and creating nodes.
@@ -73,6 +75,12 @@ To run with MySQL database tools enabled:
 
 ```bash
 cargo run -- --mysql
+```
+
+To run with Docker container tools enabled:
+
+```bash
+cargo run -- --docker
 ```
 
 Or pass prompts directly via CLI arguments for quick tasks and automation scripts.
