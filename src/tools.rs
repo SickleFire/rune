@@ -148,10 +148,41 @@ impl ToolExecutor {
         Ok(final_target)
     }
 
-    pub async fn read_file(&self, path: &Path) -> Result<String, std::io::Error> {
+    pub async fn read_file(
+        &self,
+        path: &Path,
+        start_line: Option<usize>,
+        end_line: Option<usize>,
+    ) -> Result<String, std::io::Error> {
         let safe_path = self.sanitize_path(path)?;
-        let content = tokio::fs::read_to_string(safe_path).await?;
-        Ok(content)
+        let content = tokio::fs::read_to_string(&safe_path).await?;
+
+        if start_line.is_none() && end_line.is_none() {
+            return Ok(content);
+        }
+
+        let lines: Vec<&str> = content.lines().collect();
+        let total_lines = lines.len();
+
+        let start = start_line.unwrap_or(1).max(1);
+        let end = end_line.unwrap_or(total_lines).min(total_lines);
+
+        if start > total_lines || start > end {
+            return Ok(format!(
+                "File {:?} has {} lines. Requested range {}-{} is invalid or out of bounds.",
+                safe_path, total_lines, start, end
+            ));
+        }
+
+        let mut result = String::new();
+        for (i, line) in lines.iter().enumerate() {
+            let line_num = i + 1;
+            if line_num >= start && line_num <= end {
+                result.push_str(&format!("{:4} | {}\n", line_num, line));
+            }
+        }
+
+        Ok(result)
     }
 
     pub async fn write_file(&self, path: &Path, content: &str) -> Result<String, std::io::Error> {
@@ -728,6 +759,27 @@ mod tests {
         let executor = ToolExecutor::new(dir.path().to_path_buf());
         let safe = executor.sanitize_path(Path::new("subdir/../file.txt"));
         assert!(safe.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_read_file_line_range() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("range.txt");
+        tokio::fs::write(&file_path, "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\n")
+            .await
+            .unwrap();
+
+        let executor = ToolExecutor::new(dir.path().to_path_buf());
+        let res = executor
+            .read_file(Path::new("range.txt"), Some(2), Some(4))
+            .await
+            .unwrap();
+
+        assert!(res.contains("2 | Line 2"));
+        assert!(res.contains("3 | Line 3"));
+        assert!(res.contains("4 | Line 4"));
+        assert!(!res.contains("1 | Line 1"));
+        assert!(!res.contains("5 | Line 5"));
     }
 
     #[tokio::test]

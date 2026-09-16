@@ -919,8 +919,10 @@ impl Agent {
                                     }
                                     "read_file" => {
                                         let p = tc.args["path"].as_str().unwrap_or("");
+                                        let start_line = tc.args.get("start_line").and_then(|v| v.as_u64()).map(|v| v as usize);
+                                        let end_line = tc.args.get("end_line").and_then(|v| v.as_u64()).map(|v| v as usize);
                                         executor
-                                            .read_file(Path::new(p))
+                                            .read_file(Path::new(p), start_line, end_line)
                                             .await
                                             .unwrap_or_else(|e| e.to_string())
                                     }
@@ -1007,8 +1009,10 @@ impl Agent {
                                 }
                                 "read_file" => {
                                     let p = tc.args["path"].as_str().unwrap_or("");
+                                    let start_line = tc.args.get("start_line").and_then(|v| v.as_u64()).map(|v| v as usize);
+                                    let end_line = tc.args.get("end_line").and_then(|v| v.as_u64()).map(|v| v as usize);
                                     executor
-                                        .read_file(Path::new(p))
+                                        .read_file(Path::new(p), start_line, end_line)
                                         .await
                                         .unwrap_or_else(|e| e.to_string())
                                 }
@@ -1190,7 +1194,7 @@ impl Agent {
                 continue;
             }
 
-            match self.executor.read_file(Path::new(clean)).await {
+            match self.executor.read_file(Path::new(clean), None, None).await {
                 Ok(content) => {
                     injections.push(format!(
                         "\n\n[Auto-injected content of @{clean}]:\n```\n{content}\n```"
@@ -1244,10 +1248,14 @@ pub fn get_tool_declarations() -> Vec<FunctionDeclaration> {
         },
         FunctionDeclaration {
             name: "read_file".into(),
-            description: "Read the full text content of a file.".into(),
+            description: "Read the text content of a file, optionally specifying start_line and end_line for token efficiency.".into(),
             parameters: serde_json::json!({
                 "type": "object",
-                "properties": { "path": { "type": "string", "description": "Global or relative file path" } },
+                "properties": {
+                    "path": { "type": "string", "description": "Global or relative file path" },
+                    "start_line": { "type": "integer", "description": "Optional 1-indexed starting line number to read from" },
+                    "end_line": { "type": "integer", "description": "Optional 1-indexed ending line number (inclusive) to read up to" }
+                },
                 "required": ["path"]
             }),
         },
