@@ -854,7 +854,7 @@ impl Agent {
         // Auto-truncate history if character/token count gets too large (> 25,000 chars)
         let (_, chars) = self.get_history_stats();
         if chars > 25000 {
-            self.truncate_history(16);
+            self.truncate_history(8);
         }
 
         let processed = self.resolve_mentions(raw_prompt).await;

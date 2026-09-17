@@ -1,0 +1,32 @@
+{
+  "preferences": {
+    "editor": "neovim",
+    "my_test_key": "my_test_val"
+  },
+  "past_fixes": [
+    {
+      "problem": "lifetime error in async trait",
+      "solution": "use BoxFuture and Pin"
+    },
+    {
+      "problem": "null pointer in unity component",
+      "solution": "check if component is null before invoking"
+    }
+  ],
+  "file_relations": [
+    {
+      "file_path": "src/api.rs",
+      "related_symbol": "send_request",
+      "relation_type": "calls",
+      "target_file": "src/tools.rs",
+      "notes": "executes tool"
+    },
+    {
+      "file_path": "src/main.rs",
+      "related_symbol": "main",
+      "relation_type": "depends_on",
+      "target_file": "src/lib.rs",
+      "notes": "initializes modules"
+    }
+  ]
+}

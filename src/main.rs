@@ -153,6 +153,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let enable_mysql = args.contains(&"--mysql".to_string());
     let enable_docker = args.contains(&"--docker".to_string());
 
+    // Always enable core persistent memory and session memory tools
+    agent = agent
+        .with_tool(std::sync::Arc::new(
+            rune::memory_tools::RememberPreferenceTool,
+        ))
+        .with_tool(std::sync::Arc::new(
+            rune::memory_tools::RecallMemoryTool,
+        ))
+        .with_tool(std::sync::Arc::new(
+            rune::memory_tools::RecordFixTool,
+        ))
+        .with_tool(std::sync::Arc::new(
+            rune::memory_tools::RecordFileRelationTool,
+        ));
+
     if enable_unity {
         println!("{}", "Unity editor tools enabled.".cyan());
         agent = agent
