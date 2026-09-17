@@ -125,13 +125,51 @@ fn collect_file_candidates(dir: &std::path::Path, prefix: &str, pairs: &mut Vec<
 async fn main() -> Result<(), Box<dyn Error>> {
     let workspace_root = env::current_dir().expect("Failed to get current directory");
 
-    let gemini_api_key = env::var("GEMINI_API_KEY").unwrap_or_default();
-    let gemini_model = env::var("GEMINI_MODEL").unwrap_or("gemini-3.5-flash-lite".to_string());
+    let config = rune::config::RuneConfig::load();
 
-    let openai_api_key = env::var("OPENAI_API_KEY").unwrap_or_default();
-    let openai_model = env::var("OPENAI_MODEL").unwrap_or("gpt-5.6-luna".to_string());
+    let gemini_api_key = config.gemini_api_key.clone().unwrap_or_default();
+    let gemini_model = config.gemini_model.clone().unwrap_or("gemini-3.5-flash-lite".to_string());
 
-    let default_provider: Arc<dyn LLMProvider> = if !gemini_api_key.is_empty() {
+    let openai_api_key = config.openai_api_key.clone().unwrap_or_default();
+    let openai_model = config.openai_model.clone().unwrap_or("gpt-5.6-luna".to_string());
+
+    let anthropic_api_key = config.anthropic_api_key.clone().unwrap_or_default();
+    let anthropic_model = config.anthropic_model.clone().unwrap_or("claude-3-5-sonnet".to_string());
+
+    // Determine default provider based on config.provider or available keys
+    let provider_name = config.provider.as_deref().unwrap_or("auto");
+    let default_provider: Arc<dyn LLMProvider> = if provider_name.eq_ignore_ascii_case("gemini") || (!gemini_api_key.is_empty() && provider_name == "auto") {
+        Arc::new(rune::api::GeminiProvider::new(
+            gemini_api_key.clone(),
+            gemini_model.clone(),
+        ))
+    } else if provider_name.eq_ignore_ascii_case("openai") || (!openai_api_key.is_empty() && provider_name == "auto") {
+        Arc::new(
+            rune::api::OpenAIProvider::new(openai_api_key.clone(), openai_model.clone())
+                .with_reasoning_effort("none"),
+        )
+    } else if provider_name.eq_ignore_ascii_case("anthropic") || (!anthropic_api_key.is_empty() && provider_name == "auto") {
+        Arc::new(
+            rune::api::OpenAIProvider::new(anthropic_api_key.clone(), anthropic_model.clone()) // Or Anthropic provider if implemented, falling back nicely
+                .with_reasoning_effort("none"),
+        )
+    } else if provider_name.eq_ignore_ascii_case("ollama") {
+        let base_url = config.ollama_base_url.as_deref().unwrap_or("http://localhost:11434");
+        let model = config.ollama_model.as_deref().unwrap_or("llama3");
+        println!("[Rune: Using Ollama local provider at {} (model: {})]", base_url, model);
+        Arc::new(
+            rune::api::OpenAIProvider::new("ollama-local".into(), model.into())
+                .with_reasoning_effort("none")
+        )
+    } else if provider_name.eq_ignore_ascii_case("lmstudio") {
+        let base_url = config.lm_studio_base_url.as_deref().unwrap_or("http://localhost:1234/v1");
+        let model = config.lm_studio_model.as_deref().unwrap_or("local-model");
+        println!("[Rune: Using LM Studio local provider at {} (model: {})]", base_url, model);
+        Arc::new(
+            rune::api::OpenAIProvider::new("lm-studio-local".into(), model.into())
+                .with_reasoning_effort("none")
+        )
+    } else if !gemini_api_key.is_empty() {
         Arc::new(rune::api::GeminiProvider::new(
             gemini_api_key.clone(),
             gemini_model.clone(),
@@ -142,7 +180,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .with_reasoning_effort("none"),
         )
     } else {
-        panic!("Please set either GEMINI_API_KEY or OPENAI_API_KEY environment variable.");
+        panic!("Please configure at least one LLM provider (Gemini, OpenAI, Anthropic, Ollama, or LM Studio) via rune.toml or environment variables.");
     };
 
     // Multi-agent setup (Max 2 agents: Architect & Coder)
@@ -152,8 +190,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let multi_config = if multi_agent_mode {
         // Use lightweight model for architect, powerful model for coder
-        let architect_model = env::var("ARCHITECT_MODEL").unwrap_or_else(|_| gemini_model.clone());
-        let coder_model = env::var("CODER_MODEL").unwrap_or_else(|_| gemini_model.clone());
+        let architect_model = config.architect_model.clone().unwrap_or_else(|| gemini_model.clone());
+        let coder_model = config.coder_model.clone().unwrap_or_else(|| openai_model.clone());
         MultiAgentConfig {
             agents: vec![
                 AgentConfig {
@@ -175,6 +213,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     } else {
         let active_model = if !gemini_api_key.is_empty() {
             gemini_model.clone()
+        } else if !openai_api_key.is_empty() {
+            openai_model.clone()
         } else {
             openai_model.clone()
         };
@@ -198,8 +238,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             format!(
                 "Multi-agent mode ENABLED ({} agents: Architect [{}] -> Coder [{}]).",
                 orchestrator.agent_count(),
-                env::var("ARCHITECT_MODEL").unwrap_or(gemini_model.clone()),
-                env::var("CODER_MODEL").unwrap_or(openai_model.clone())
+                config.architect_model.as_deref().unwrap_or(&gemini_model),
+                config.coder_model.as_deref().unwrap_or(&openai_model)
             )
             .cyan()
             .bold()

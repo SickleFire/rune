@@ -43,6 +43,16 @@ Rune is an expert AI coding assistant integrated into a software development wor
 - Cargo
 - Unity 2022+ / Unity Editor (optional, for Unity Bridge integration)
 
+### Configuration & Environment Management
+
+Rune supports configuring API keys, models, and local endpoints via a streamlined `rune.toml` configuration file in your project root or home directory, with full backward compatibility for environment variables (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `RUNE_*`).
+
+1. Copy the sample configuration file:
+   ```bash
+   cp rune.toml.example rune.toml
+   ```
+2. Edit `rune.toml` to specify your preferred provider, API keys, models (such as `gpt-5.6-luna`, `gemini-3.5-flash-lite`, or local models via Ollama / LM Studio).
+
 ### Building
 
 ```bash

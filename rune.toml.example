@@ -1,0 +1,26 @@
+# Rune Configuration Example (`rune.toml`)
+# Copy this file to `rune.toml` in your project root or home directory.
+
+# Choose default active provider: "gemini", "openai", "anthropic", "ollama", or "lmstudio"
+provider = "gemini"
+
+# API Keys
+gemini_api_key = ""
+openai_api_key = ""
+anthropic_api_key = ""
+
+# Model Choices
+gemini_model = "gemini-3.5-flash-lite"
+openai_model = "gpt-5.6-luna"
+anthropic_model = "claude-3-5-sonnet"
+
+# Local Endpoints (Ollama / LM Studio)
+ollama_base_url = "http://localhost:11434"
+ollama_model = "llama3"
+
+lm_studio_base_url = "http://localhost:1234/v1"
+lm_studio_model = "local-model"
+
+# Multi-Agent Role Model Overrides
+architect_model = "gemini-3.5-flash-lite"
+coder_model = "gpt-5.6-luna"
