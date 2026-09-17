@@ -1,5 +1,5 @@
 use colored::*;
-use similar::{ChangeTag, TextDiff};
+use similar::TextDiff;
 use std::io;
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
@@ -201,13 +201,21 @@ impl ToolExecutor {
             path.display().to_string().yellow()
         );
         let diff = TextDiff::from_lines(old_content.as_str(), content);
-        for change in diff.iter_all_changes() {
-            let (sign, line_str) = match change.tag() {
-                ChangeTag::Delete => ("- ", format!("{}", change).red()),
-                ChangeTag::Insert => ("+ ", format!("{}", change).green()),
-                ChangeTag::Equal => ("  ", format!("{}", change).normal()),
+        let unified = diff
+            .unified_diff()
+            .header(&path.display().to_string(), &path.display().to_string())
+            .to_string();
+        for line in unified.lines() {
+            let (sign, colored_line) = if line.starts_with('+') && !line.starts_with("+++") {
+                ("+ ", line[1..].green())
+            } else if line.starts_with('-') && !line.starts_with("---") {
+                ("- ", line[1..].red())
+            } else if line.starts_with("@@") {
+                ("  ", line.cyan())
+            } else {
+                ("  ", line.normal())
             };
-            print!("{}{}", sign.dimmed(), line_str);
+            println!("{}{}", sign.dimmed(), colored_line);
         }
         println!();
 
@@ -270,13 +278,21 @@ impl ToolExecutor {
             path.display().to_string().yellow()
         );
         let diff = TextDiff::from_lines(old_content.as_str(), new_content.as_str());
-        for change in diff.iter_all_changes() {
-            let (sign, line_str) = match change.tag() {
-                ChangeTag::Delete => ("- ", format!("{}", change).red()),
-                ChangeTag::Insert => ("+ ", format!("{}", change).green()),
-                ChangeTag::Equal => ("  ", format!("{}", change).normal()),
+        let unified = diff
+            .unified_diff()
+            .header(&path.display().to_string(), &path.display().to_string())
+            .to_string();
+        for line in unified.lines() {
+            let (sign, colored_line) = if line.starts_with('+') && !line.starts_with("+++") {
+                ("+ ", line[1..].green())
+            } else if line.starts_with('-') && !line.starts_with("---") {
+                ("- ", line[1..].red())
+            } else if line.starts_with("@@") {
+                ("  ", line.cyan())
+            } else {
+                ("  ", line.normal())
             };
-            print!("{}{}", sign.dimmed(), line_str);
+            println!("{}{}", sign.dimmed(), colored_line);
         }
         println!();
 
@@ -285,16 +301,7 @@ impl ToolExecutor {
 
     fn format_diff(old: &str, new: &str) -> String {
         let diff = TextDiff::from_lines(old, new);
-        let mut out = String::new();
-        for change in diff.iter_all_changes() {
-            let sign = match change.tag() {
-                ChangeTag::Delete => "-",
-                ChangeTag::Insert => "+",
-                ChangeTag::Equal => " ",
-            };
-            out.push_str(&format!("{sign} {change}"));
-        }
-        out
+        diff.unified_diff().to_string()
     }
 
     pub async fn apply_patch(
@@ -685,13 +692,21 @@ impl ToolExecutor {
             path.display().to_string().yellow()
         );
         let diff = TextDiff::from_lines(old_content.as_str(), content);
-        for change in diff.iter_all_changes() {
-            let (sign, line_str) = match change.tag() {
-                ChangeTag::Delete => ("- ", format!("{}", change).red()),
-                ChangeTag::Insert => ("+ ", format!("{}", change).green()),
-                ChangeTag::Equal => ("  ", format!("{}", change).normal()),
+        let unified = diff
+            .unified_diff()
+            .header(&path.display().to_string(), &path.display().to_string())
+            .to_string();
+        for line in unified.lines() {
+            let (sign, colored_line) = if line.starts_with('+') && !line.starts_with("+++") {
+                ("+ ", line[1..].green())
+            } else if line.starts_with('-') && !line.starts_with("---") {
+                ("- ", line[1..].red())
+            } else if line.starts_with("@@") {
+                ("  ", line.cyan())
+            } else {
+                ("  ", line.normal())
             };
-            print!("{}{}", sign.dimmed(), line_str);
+            println!("{}{}", sign.dimmed(), colored_line);
         }
         println!();
         let _ = std::io::Write::flush(&mut std::io::stdout());
