@@ -1,8 +1,7 @@
 use colored::*;
-use rune::api::LLMProvider;
 use rune::agent::{AgentConfig, AgentRole, MultiAgentConfig, MultiAgentOrchestrator};
+use rune::api::LLMProvider;
 use rustyline::Context;
-use std::sync::Arc;
 use rustyline::Editor;
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
@@ -11,6 +10,7 @@ use rustyline::hint::{Hinter, HistoryHinter};
 use rustyline::validate::Validator;
 use std::env;
 use std::error::Error;
+use std::sync::Arc;
 
 struct RuneHelper {
     hinter: HistoryHinter,
@@ -132,28 +132,37 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let openai_model = env::var("OPENAI_MODEL").unwrap_or("gpt-5.6-luna".to_string());
 
     let default_provider: Arc<dyn LLMProvider> = if !gemini_api_key.is_empty() {
-        Arc::new(rune::api::GeminiProvider::new(gemini_api_key.clone(), gemini_model.clone()))
+        Arc::new(rune::api::GeminiProvider::new(
+            gemini_api_key.clone(),
+            gemini_model.clone(),
+        ))
     } else if !openai_api_key.is_empty() {
-        Arc::new(rune::api::OpenAIProvider::new(openai_api_key.clone(), openai_model.clone()).with_reasoning_effort("none"))
+        Arc::new(
+            rune::api::OpenAIProvider::new(openai_api_key.clone(), openai_model.clone())
+                .with_reasoning_effort("none"),
+        )
     } else {
         panic!("Please set either GEMINI_API_KEY or OPENAI_API_KEY environment variable.");
     };
 
     // Multi-agent setup (Max 2 agents: Architect & Coder)
-    let multi_agent_mode = env::var("RUNE_MULTI_AGENT").unwrap_or_else(|_| "false".to_string()) == "true"
+    let multi_agent_mode = env::var("RUNE_MULTI_AGENT").unwrap_or_else(|_| "false".to_string())
+        == "true"
         || std::env::args().any(|arg| arg == "--multi-agent");
 
     let multi_config = if multi_agent_mode {
         // Use lightweight model for architect, powerful model for coder
         let architect_model = env::var("ARCHITECT_MODEL").unwrap_or_else(|_| gemini_model.clone());
-        let coder_model = env::var("CODER_MODEL").unwrap_or_else(|_| openai_model.clone());
+        let coder_model = env::var("CODER_MODEL").unwrap_or_else(|_| gemini_model.clone());
         MultiAgentConfig {
             agents: vec![
                 AgentConfig {
                     name: "Architect".into(),
                     role: AgentRole::Architect,
                     model: architect_model,
-                    system_prompt: Some("You are the Architect agent. Your goal is to analyze user requests, inspect files, search code, and formulate clear step-by-step execution plans efficiently with minimal tokens.".into()),
+                    system_prompt: Some("You are the Architect agent. Your goal is to analyze user requests, inspect files, \
+        search code, and formulate clear step-by-step execution plans efficiently with minimal tokens. \
+        You cannot edit files or run commands — your only output is a plan.".into()),
                 },
                 AgentConfig {
                     name: "Coder".into(),
@@ -164,24 +173,37 @@ async fn main() -> Result<(), Box<dyn Error>> {
             ],
         }
     } else {
-        let active_model = if !gemini_api_key.is_empty() { gemini_model.clone() } else { openai_model.clone() };
+        let active_model = if !gemini_api_key.is_empty() {
+            gemini_model.clone()
+        } else {
+            openai_model.clone()
+        };
         MultiAgentConfig {
-            agents: vec![
-                AgentConfig {
-                    name: "RuneAgent".into(),
-                    role: AgentRole::Coder,
-                    model: active_model,
-                    system_prompt: None,
-                }
-            ],
+            agents: vec![AgentConfig {
+                name: "RuneAgent".into(),
+                role: AgentRole::Coder,
+                model: active_model,
+                system_prompt: None,
+            }],
         }
     };
 
-    let mut orchestrator = MultiAgentOrchestrator::new(default_provider, workspace_root.clone(), multi_config)
-        .expect("Failed to initialize multi-agent orchestrator");
+    let mut orchestrator =
+        MultiAgentOrchestrator::new(default_provider, workspace_root.clone(), multi_config)
+            .expect("Failed to initialize multi-agent orchestrator");
 
     if multi_agent_mode {
-        println!("{}", format!("Multi-agent mode ENABLED ({} agents: Architect [{}] -> Coder [{}]).", orchestrator.agent_count(), env::var("ARCHITECT_MODEL").unwrap_or(gemini_model.clone()), env::var("CODER_MODEL").unwrap_or(openai_model.clone())).cyan().bold());
+        println!(
+            "{}",
+            format!(
+                "Multi-agent mode ENABLED ({} agents: Architect [{}] -> Coder [{}]).",
+                orchestrator.agent_count(),
+                env::var("ARCHITECT_MODEL").unwrap_or(gemini_model.clone()),
+                env::var("CODER_MODEL").unwrap_or(openai_model.clone())
+            )
+            .cyan()
+            .bold()
+        );
     }
 
     let args: Vec<String> = env::args().collect();
@@ -197,12 +219,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with_tool_on_all(std::sync::Arc::new(
             rune::memory_tools::RememberPreferenceTool,
         ))
-        .with_tool_on_all(std::sync::Arc::new(
-            rune::memory_tools::RecallMemoryTool,
-        ))
-        .with_tool_on_all(std::sync::Arc::new(
-            rune::memory_tools::RecordFixTool,
-        ))
+        .with_tool_on_all(std::sync::Arc::new(rune::memory_tools::RecallMemoryTool))
+        .with_tool_on_all(std::sync::Arc::new(rune::memory_tools::RecordFixTool))
         .with_tool_on_all(std::sync::Arc::new(
             rune::memory_tools::RecordFileRelationTool,
         ));
@@ -360,7 +378,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
 
                 if prompt.eq_ignore_ascii_case("/clear") || prompt.eq_ignore_ascii_case("/reset") {
-                    println!("{}", "Cleared conversation history (multi-agent orchestrator reset).".green());
+                    println!(
+                        "{}",
+                        "Cleared conversation history (multi-agent orchestrator reset).".green()
+                    );
                     continue;
                 }
 
@@ -369,7 +390,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         let workspace_root = std::env::current_dir()?;
                         let executor = rune::tools::ToolExecutor::new(workspace_root);
                         executor.undo_git_checkpoint().await
-                    }).await;
+                    })
+                    .await;
 
                     match undo_result {
                         Ok(msg) => println!("{}", msg.green()),
@@ -380,7 +402,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                 if prompt.eq_ignore_ascii_case("/context") || prompt.eq_ignore_ascii_case("/tokens")
                 {
-                    println!("{}", format!("Multi-agent mode active with {} agents.", orchestrator.agent_count()).cyan());
+                    println!(
+                        "{}",
+                        format!(
+                            "Multi-agent mode active with {} agents.",
+                            orchestrator.agent_count()
+                        )
+                        .cyan()
+                    );
                     continue;
                 }
 
@@ -388,7 +417,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     let agent = rune::api::Agent::new_gemini(
                         env::var("GEMINI_API_KEY").unwrap_or_default(),
                         workspace_root.clone(),
-                        gemini_model.clone()
+                        gemini_model.clone(),
                     );
                     let map = agent.build_project_map(&workspace_root, "");
                     println!("{}", "=== Repository File Tree ===".cyan().bold());
@@ -446,8 +475,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     continue;
                 }
 
-                if prompt.starts_with("/provider") || prompt.starts_with("/model") || prompt.starts_with("/save") || prompt.starts_with("/load") {
-                    println!("{}", "Command handled by multi-agent orchestrator setup.".cyan());
+                if prompt.starts_with("/provider")
+                    || prompt.starts_with("/model")
+                    || prompt.starts_with("/save")
+                    || prompt.starts_with("/load")
+                {
+                    println!(
+                        "{}",
+                        "Command handled by multi-agent orchestrator setup.".cyan()
+                    );
                     continue;
                 }
 
@@ -621,7 +657,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                 let _ = rl.add_history_entry(prompt);
 
-                orchestrator.run_workflow(prompt, auto_approve, plan_mode).await;
+                orchestrator
+                    .run_workflow(prompt, auto_approve, plan_mode)
+                    .await;
                 println!();
             }
             Err(ReadlineError::Interrupted) => {

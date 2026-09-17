@@ -94,9 +94,13 @@ impl AgentTool for RecallMemoryTool {
             output.push_str(&format!("[Preference] {} = {}\n", query, pref));
         }
         let q_lower = query.to_lowercase();
-        let matching_prefs: Vec<(&String, &String)> = store.preferences
+        let matching_prefs: Vec<(&String, &String)> = store
+            .preferences
             .iter()
-            .filter(|(k, v)| (k.to_lowercase().contains(&q_lower) || v.to_lowercase().contains(&q_lower)) && *k != query)
+            .filter(|(k, v)| {
+                (k.to_lowercase().contains(&q_lower) || v.to_lowercase().contains(&q_lower))
+                    && *k != query
+            })
             .collect();
         if !matching_prefs.is_empty() {
             output.push_str("--- Preferences ---\n");
@@ -108,7 +112,10 @@ impl AgentTool for RecallMemoryTool {
         if !fixes.is_empty() {
             output.push_str("--- Past Fixes ---\n");
             for fix in fixes {
-                output.push_str(&format!("Problem: {}\nSolution: {}\n\n", fix.problem, fix.solution));
+                output.push_str(&format!(
+                    "Problem: {}\nSolution: {}\n\n",
+                    fix.problem, fix.solution
+                ));
             }
         }
 
@@ -117,7 +124,11 @@ impl AgentTool for RecallMemoryTool {
             for rel in relations {
                 output.push_str(&format!(
                     "File: {} -> Symbol: [{}] {} -> Target: {} (Notes: {})\n",
-                    rel.file_path, rel.relation_type, rel.related_symbol, rel.target_file, rel.notes
+                    rel.file_path,
+                    rel.relation_type,
+                    rel.related_symbol,
+                    rel.target_file,
+                    rel.notes
                 ));
             }
         }
@@ -241,7 +252,8 @@ impl AgentTool for RecordFileRelationTool {
         };
 
         let mut store = MemoryStore::load();
-        match store.add_file_relation(file_path, related_symbol, relation_type, target_file, notes) {
+        match store.add_file_relation(file_path, related_symbol, relation_type, target_file, notes)
+        {
             Ok(()) => "Successfully recorded file and symbol relationship.".to_string(),
             Err(e) => format!("Failed to save memory: {}", e),
         }

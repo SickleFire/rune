@@ -692,7 +692,10 @@ mod tests {
         assert!(find_assets.is_read_only());
 
         let create_so = UnityCreateScriptableObjectTool::new();
-        assert_eq!(create_so.declaration().name, "unity_create_scriptable_object");
+        assert_eq!(
+            create_so.declaration().name,
+            "unity_create_scriptable_object"
+        );
         assert!(!create_so.is_read_only());
     }
 

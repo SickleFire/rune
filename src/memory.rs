@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -36,7 +36,7 @@ impl MemoryStore {
                 return local_dir.join("memory.json");
             }
         }
-        
+
         if let Some(home) = dirs_or_home() {
             let config_dir = home.join(".config").join("rune");
             if fs::create_dir_all(&config_dir).is_ok() {
@@ -65,7 +65,11 @@ impl MemoryStore {
         fs::write(path, data).map_err(|e| e.to_string())
     }
 
-    pub fn set_preference(&mut self, key: impl Into<String>, value: impl Into<String>) -> Result<(), String> {
+    pub fn set_preference(
+        &mut self,
+        key: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Result<(), String> {
         self.preferences.insert(key.into(), value.into());
         self.save()
     }
@@ -74,7 +78,11 @@ impl MemoryStore {
         self.preferences.get(key)
     }
 
-    pub fn add_fix(&mut self, problem: impl Into<String>, solution: impl Into<String>) -> Result<(), String> {
+    pub fn add_fix(
+        &mut self,
+        problem: impl Into<String>,
+        solution: impl Into<String>,
+    ) -> Result<(), String> {
         self.past_fixes.push(PastFix {
             problem: problem.into(),
             solution: solution.into(),
@@ -86,7 +94,9 @@ impl MemoryStore {
         let q = query.to_lowercase();
         self.past_fixes
             .iter()
-            .filter(|f| f.problem.to_lowercase().contains(&q) || f.solution.to_lowercase().contains(&q))
+            .filter(|f| {
+                f.problem.to_lowercase().contains(&q) || f.solution.to_lowercase().contains(&q)
+            })
             .collect()
     }
 

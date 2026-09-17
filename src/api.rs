@@ -708,7 +708,8 @@ impl Agent {
     }
 
     pub fn inject_custom_system_context(&mut self, custom_context: String) {
-        self.history.insert(0, CanonicalMessage::User(custom_context));
+        self.history
+            .insert(0, CanonicalMessage::User(custom_context));
     }
 
     pub fn get_last_assistant_text(&self) -> Option<String> {
@@ -750,6 +751,22 @@ impl Agent {
         let json = std::fs::read_to_string(path)?;
         self.history = serde_json::from_str(&json)?;
         Ok(())
+    }
+
+    pub fn restrict_to_read_only_tools(&mut self) {
+        self.tools.retain(|t| {
+            matches!(
+                t.name.as_str(),
+                "list_files"
+                    | "read_file"
+                    | "search_code"
+                    | "search_symbol"
+                    | "git_status"
+                    | "git_diff"
+            )
+        });
+        // also strip any dynamic mutating tools
+        self.dynamic_tools.retain(|_, tool| !tool.is_destructive());
     }
 
     fn initialize_system_context(&mut self) {
@@ -931,8 +948,16 @@ impl Agent {
                                     }
                                     "read_file" => {
                                         let p = tc.args["path"].as_str().unwrap_or("");
-                                        let start_line = tc.args.get("start_line").and_then(|v| v.as_u64()).map(|v| v as usize);
-                                        let end_line = tc.args.get("end_line").and_then(|v| v.as_u64()).map(|v| v as usize);
+                                        let start_line = tc
+                                            .args
+                                            .get("start_line")
+                                            .and_then(|v| v.as_u64())
+                                            .map(|v| v as usize);
+                                        let end_line = tc
+                                            .args
+                                            .get("end_line")
+                                            .and_then(|v| v.as_u64())
+                                            .map(|v| v as usize);
                                         executor
                                             .read_file(Path::new(p), start_line, end_line)
                                             .await
@@ -1021,8 +1046,16 @@ impl Agent {
                                 }
                                 "read_file" => {
                                     let p = tc.args["path"].as_str().unwrap_or("");
-                                    let start_line = tc.args.get("start_line").and_then(|v| v.as_u64()).map(|v| v as usize);
-                                    let end_line = tc.args.get("end_line").and_then(|v| v.as_u64()).map(|v| v as usize);
+                                    let start_line = tc
+                                        .args
+                                        .get("start_line")
+                                        .and_then(|v| v.as_u64())
+                                        .map(|v| v as usize);
+                                    let end_line = tc
+                                        .args
+                                        .get("end_line")
+                                        .and_then(|v| v.as_u64())
+                                        .map(|v| v as usize);
                                     executor
                                         .read_file(Path::new(p), start_line, end_line)
                                         .await

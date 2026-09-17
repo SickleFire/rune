@@ -45,7 +45,9 @@ impl MultiAgentConfig {
             }
         }
         if self.agents.len() == 2 && (!has_architect || !has_coder) {
-            return Err("When 2 agents are configured, one must be Architect and one must be Coder.".into());
+            return Err(
+                "When 2 agents are configured, one must be Architect and one must be Coder.".into(),
+            );
         }
         Ok(())
     }
@@ -72,8 +74,16 @@ impl MultiAgentOrchestrator {
                 agent_cfg.model.clone(),
                 workspace_root.clone(),
             );
+
+            if agent_cfg.role == AgentRole::Architect {
+                agent.restrict_to_read_only_tools();
+            }
+
             if let Some(ref prompt) = agent_cfg.system_prompt {
-                let custom_init = format!("[AGENT PERSONA: {} ({:?})]\n{}", agent_cfg.name, agent_cfg.role, prompt);
+                let custom_init = format!(
+                    "[AGENT PERSONA: {} ({:?})]\n{}",
+                    agent_cfg.name, agent_cfg.role, prompt
+                );
                 agent.inject_custom_system_context(custom_init);
             }
             agents.push(agent);
@@ -95,24 +105,38 @@ impl MultiAgentOrchestrator {
 
     pub async fn run_workflow(&mut self, prompt: &str, auto_approve: bool, plan_mode: bool) {
         if self.agents.len() == 1 {
-            self.agents[0].run_with_mode(prompt, auto_approve, plan_mode).await;
+            self.agents[0]
+                .run_with_mode(prompt, auto_approve, plan_mode)
+                .await;
             return;
         }
 
-        println!("{}", "=== Multi-Agent Workflow: Step 1 [Architect Analysis & Planning] ===".cyan().bold());
-        
+        println!(
+            "{}",
+            "=== Multi-Agent Workflow: Step 1 [Architect Analysis & Planning] ==="
+                .cyan()
+                .bold()
+        );
+
         self.agents[0].run_with_mode(prompt, true, true).await;
 
         let architect_plan = self.agents[0]
             .get_last_assistant_text()
             .unwrap_or_else(|| "Proceed with standard execution based on user prompt.".to_string());
 
-        println!("\n{}", "=== Multi-Agent Workflow: Step 2 [Coder Execution & Implementation] ===".cyan().bold());
+        println!(
+            "\n{}",
+            "=== Multi-Agent Workflow: Step 2 [Coder Execution & Implementation] ==="
+                .cyan()
+                .bold()
+        );
         let coder_prompt = format!(
             "User Request:\n{prompt}\n\nArchitect Plan & Guidance:\n{architect_plan}\n\nPlease implement the plan and execute necessary changes."
         );
 
-        self.agents[1].run_with_mode(&coder_prompt, auto_approve, plan_mode).await;
+        self.agents[1]
+            .run_with_mode(&coder_prompt, auto_approve, plan_mode)
+            .await;
     }
 
     pub fn with_tool_on_all(mut self, tool: Arc<dyn AgentTool>) -> Self {
