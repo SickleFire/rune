@@ -140,10 +140,11 @@ impl MultiAgentOrchestrator {
     }
 
     pub fn with_tool_on_all(mut self, tool: Arc<dyn AgentTool>) -> Self {
-        for agent in &mut self.agents {
-            let _ = agent;
-            let _ = &tool;
-        }
+        self.agents = self
+            .agents
+            .into_iter()
+            .map(|agent| agent.with_tool(Arc::clone(&tool)))
+            .collect();
         self
     }
 }
@@ -196,5 +197,32 @@ mod tests {
         };
         let err_msg = invalid_config.validate().unwrap_err();
         assert!(err_msg.contains("Maximum number of agents allowed is 2"));
+    }
+
+    #[test]
+    fn test_with_tool_on_all() {
+        let config = MultiAgentConfig {
+            agents: vec![
+                AgentConfig {
+                    name: "Architect".into(),
+                    role: AgentRole::Architect,
+                    model: "test-model".into(),
+                    system_prompt: None,
+                },
+                AgentConfig {
+                    name: "Coder".into(),
+                    role: AgentRole::Coder,
+                    model: "test-model".into(),
+                    system_prompt: None,
+                },
+            ],
+        };
+        let provider: Arc<dyn crate::api::LLMProvider> = Arc::new(
+            crate::api::OpenAIProvider::new("test-key".into(), "test-model".into())
+        );
+        let orchestrator = MultiAgentOrchestrator::new(provider, std::path::PathBuf::from("."), config).unwrap();
+        let tool = std::sync::Arc::new(crate::memory_tools::RememberPreferenceTool);
+        let orchestrator_with_tool = orchestrator.with_tool_on_all(tool);
+        assert_eq!(orchestrator_with_tool.agents.len(), 2);
     }
 }
