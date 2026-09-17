@@ -30,11 +30,13 @@ pub struct FileRelation {
 
 impl MemoryStore {
     pub fn memory_file_path() -> PathBuf {
+        if let Ok(path) = std::env::var("RUNE_MEMORY_PATH") {
+            return PathBuf::from(path);
+        }
         if let Ok(cwd) = std::env::current_dir() {
             let local_dir = cwd.join(".rune");
-            if local_dir.exists() || fs::create_dir_all(&local_dir).is_ok() {
-                return local_dir.join("memory.json");
-            }
+            let _ = fs::create_dir_all(&local_dir);
+            return local_dir.join("memory.json");
         }
 
         if let Some(home) = dirs_or_home() {
@@ -70,8 +72,11 @@ impl MemoryStore {
         key: impl Into<String>,
         value: impl Into<String>,
     ) -> Result<(), String> {
-        self.preferences.insert(key.into(), value.into());
-        self.save()
+        let mut latest = Self::load();
+        latest.preferences.insert(key.into(), value.into());
+        latest.save()?;
+        *self = latest;
+        Ok(())
     }
 
     pub fn get_preference(&self, key: &str) -> Option<&String> {
@@ -83,11 +88,14 @@ impl MemoryStore {
         problem: impl Into<String>,
         solution: impl Into<String>,
     ) -> Result<(), String> {
-        self.past_fixes.push(PastFix {
+        let mut latest = Self::load();
+        latest.past_fixes.push(PastFix {
             problem: problem.into(),
             solution: solution.into(),
         });
-        self.save()
+        latest.save()?;
+        *self = latest;
+        Ok(())
     }
 
     pub fn search_fixes(&self, query: &str) -> Vec<&PastFix> {
@@ -108,14 +116,17 @@ impl MemoryStore {
         target_file: impl Into<String>,
         notes: impl Into<String>,
     ) -> Result<(), String> {
-        self.file_relations.push(FileRelation {
+        let mut latest = Self::load();
+        latest.file_relations.push(FileRelation {
             file_path: file_path.into(),
             related_symbol: related_symbol.into(),
             relation_type: relation_type.into(),
             target_file: target_file.into(),
             notes: notes.into(),
         });
-        self.save()
+        latest.save()?;
+        *self = latest;
+        Ok(())
     }
 
     pub fn query_relations(&self, query: &str) -> Vec<&FileRelation> {

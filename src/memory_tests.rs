@@ -9,6 +9,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_memory_store_lifecycle() {
+        let temp_dir = std::env::temp_dir().join(format!("rune_test_{}", uuid_or_random()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let test_path = temp_dir.join("memory.json");
+        unsafe { std::env::set_var("RUNE_MEMORY_PATH", &test_path); }
+
         let mut store = MemoryStore::default();
         let _ = store.set_preference("editor", "neovim");
         assert_eq!(store.get_preference("editor").unwrap(), "neovim");
@@ -29,10 +34,18 @@ mod tests {
         let rels = store.query_relations("send_request");
         assert_eq!(rels.len(), 1);
         assert_eq!(rels[0].target_file, "src/tools.rs");
+        
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        unsafe { std::env::remove_var("RUNE_MEMORY_PATH"); }
     }
 
     #[tokio::test]
     async fn test_memory_tools_execution() {
+        let temp_dir = std::env::temp_dir().join(format!("rune_test_{}", uuid_or_random()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let test_path = temp_dir.join("memory.json");
+        unsafe { std::env::set_var("RUNE_MEMORY_PATH", &test_path); }
+
         let pref_tool = RememberPreferenceTool;
         let _res1 = pref_tool
             .execute(json!({
@@ -70,5 +83,16 @@ mod tests {
             }))
             .await;
         assert!(res4.contains("Successfully recorded file and symbol relationship"));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        unsafe { std::env::remove_var("RUNE_MEMORY_PATH"); }
+    }
+
+    fn uuid_or_random() -> u64 {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.subsec_nanos() as u64)
+            .unwrap_or(12345)
     }
 }
