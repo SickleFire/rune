@@ -283,13 +283,27 @@ impl ToolExecutor {
         Ok((safe_path, old_content, new_content))
     }
 
+    fn format_diff(old: &str, new: &str) -> String {
+        let diff = TextDiff::from_lines(old, new);
+        let mut out = String::new();
+        for change in diff.iter_all_changes() {
+            let sign = match change.tag() {
+                ChangeTag::Delete => "-",
+                ChangeTag::Insert => "+",
+                ChangeTag::Equal => " ",
+            };
+            out.push_str(&format!("{sign} {change}"));
+        }
+        out
+    }
+
     pub async fn apply_patch(
         &self,
         safe_path: &Path,
         expected_old_content: &str,
         new_content: &str,
-        search_len: usize,
-        replace_len: usize,
+        _search_len: usize,
+        _replace_len: usize,
     ) -> Result<String, std::io::Error> {
         let current = tokio::fs::read_to_string(safe_path)
             .await
@@ -304,9 +318,10 @@ impl ToolExecutor {
             ));
         }
         tokio::fs::write(safe_path, new_content).await?;
+        let diff_summary = Self::format_diff(expected_old_content, new_content);
         Ok(format!(
-            "Successfully patched file {:?} (replaced {} bytes with {} bytes)",
-            safe_path, search_len, replace_len
+            "Successfully patched file {:?}.\nDiff summary:\n{}",
+            safe_path, diff_summary
         ))
     }
 
@@ -706,10 +721,10 @@ impl ToolExecutor {
             tokio::fs::create_dir_all(parent).await?;
         }
         tokio::fs::write(safe_path, content).await?;
+        let diff_summary = Self::format_diff(expected_old_content, content);
         Ok(format!(
-            "Successfully wrote {} bytes to {:?}",
-            content.len(),
-            safe_path
+            "Successfully wrote file {:?}.\nDiff summary:\n{}",
+            safe_path, diff_summary
         ))
     }
 }
