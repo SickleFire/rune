@@ -707,8 +707,19 @@ impl Agent {
         self
     }
 
-    pub fn get_workspace_root(&self) -> &PathBuf {
-        &self.workspace_root
+    pub fn inject_custom_system_context(&mut self, custom_context: String) {
+        self.history.insert(0, CanonicalMessage::User(custom_context));
+    }
+
+    pub fn get_last_assistant_text(&self) -> Option<String> {
+        for msg in self.history.iter().rev() {
+            if let CanonicalMessage::Assistant { text, .. } = msg {
+                if let Some(t) = text {
+                    return Some(t.clone());
+                }
+            }
+        }
+        None
     }
 
     pub async fn undo(&self) -> Result<String, std::io::Error> {

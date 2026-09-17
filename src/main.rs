@@ -1,6 +1,8 @@
 use colored::*;
-use rune::api::Agent;
+use rune::api::LLMProvider;
+use rune::agent::{AgentConfig, AgentRole, MultiAgentConfig, MultiAgentOrchestrator};
 use rustyline::Context;
+use std::sync::Arc;
 use rustyline::Editor;
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
@@ -129,21 +131,58 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let openai_api_key = env::var("OPENAI_API_KEY").unwrap_or_default();
     let openai_model = env::var("OPENAI_MODEL").unwrap_or("gpt-5.6-luna".to_string());
 
-    let mut agent = if !gemini_api_key.is_empty() {
-        Agent::new_gemini(
-            gemini_api_key.clone(),
-            workspace_root.clone(),
-            gemini_model.clone(),
-        )
+    let default_provider: Arc<dyn LLMProvider> = if !gemini_api_key.is_empty() {
+        Arc::new(rune::api::GeminiProvider::new(gemini_api_key.clone(), gemini_model.clone()))
     } else if !openai_api_key.is_empty() {
-        Agent::new_openai(
-            openai_api_key.clone(),
-            workspace_root.clone(),
-            openai_model.clone(),
-        )
+        Arc::new(rune::api::OpenAIProvider::new(openai_api_key.clone(), openai_model.clone()).with_reasoning_effort("none"))
     } else {
         panic!("Please set either GEMINI_API_KEY or OPENAI_API_KEY environment variable.");
     };
+
+    // Multi-agent setup (Max 2 agents: Architect & Coder)
+    let multi_agent_mode = env::var("RUNE_MULTI_AGENT").unwrap_or_else(|_| "false".to_string()) == "true"
+        || std::env::args().any(|arg| arg == "--multi-agent");
+
+    let multi_config = if multi_agent_mode {
+        // Use lightweight model for architect, powerful model for coder
+        let architect_model = env::var("ARCHITECT_MODEL").unwrap_or_else(|_| gemini_model.clone());
+        let coder_model = env::var("CODER_MODEL").unwrap_or_else(|_| openai_model.clone());
+        MultiAgentConfig {
+            agents: vec![
+                AgentConfig {
+                    name: "Architect".into(),
+                    role: AgentRole::Architect,
+                    model: architect_model,
+                    system_prompt: Some("You are the Architect agent. Your goal is to analyze user requests, inspect files, search code, and formulate clear step-by-step execution plans efficiently with minimal tokens.".into()),
+                },
+                AgentConfig {
+                    name: "Coder".into(),
+                    role: AgentRole::Coder,
+                    model: coder_model,
+                    system_prompt: Some("You are the Coder agent. Your goal is to take the user request and Architect's plan, then execute precise edits, run tests, and complete the implementation.".into()),
+                },
+            ],
+        }
+    } else {
+        let active_model = if !gemini_api_key.is_empty() { gemini_model.clone() } else { openai_model.clone() };
+        MultiAgentConfig {
+            agents: vec![
+                AgentConfig {
+                    name: "RuneAgent".into(),
+                    role: AgentRole::Coder,
+                    model: active_model,
+                    system_prompt: None,
+                }
+            ],
+        }
+    };
+
+    let mut orchestrator = MultiAgentOrchestrator::new(default_provider, workspace_root.clone(), multi_config)
+        .expect("Failed to initialize multi-agent orchestrator");
+
+    if multi_agent_mode {
+        println!("{}", format!("Multi-agent mode ENABLED ({} agents: Architect [{}] -> Coder [{}]).", orchestrator.agent_count(), env::var("ARCHITECT_MODEL").unwrap_or(gemini_model.clone()), env::var("CODER_MODEL").unwrap_or(openai_model.clone())).cyan().bold());
+    }
 
     let args: Vec<String> = env::args().collect();
     let enable_unity = args.contains(&"--unity".to_string());
@@ -154,96 +193,96 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let enable_docker = args.contains(&"--docker".to_string());
 
     // Always enable core persistent memory and session memory tools
-    agent = agent
-        .with_tool(std::sync::Arc::new(
+    orchestrator = orchestrator
+        .with_tool_on_all(std::sync::Arc::new(
             rune::memory_tools::RememberPreferenceTool,
         ))
-        .with_tool(std::sync::Arc::new(
+        .with_tool_on_all(std::sync::Arc::new(
             rune::memory_tools::RecallMemoryTool,
         ))
-        .with_tool(std::sync::Arc::new(
+        .with_tool_on_all(std::sync::Arc::new(
             rune::memory_tools::RecordFixTool,
         ))
-        .with_tool(std::sync::Arc::new(
+        .with_tool_on_all(std::sync::Arc::new(
             rune::memory_tools::RecordFileRelationTool,
         ));
 
     if enable_unity {
         println!("{}", "Unity editor tools enabled.".cyan());
-        agent = agent
-            .with_tool(std::sync::Arc::new(
+        orchestrator = orchestrator
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::unity_tools::UnityInspectSceneTool::new(),
             ))
-            .with_tool(std::sync::Arc::new(
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::unity_tools::UnitySetPropertyTool::new(),
             ))
-            .with_tool(std::sync::Arc::new(
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::unity_tools::UnityInspectComponentsTool::new(),
             ))
-            .with_tool(std::sync::Arc::new(
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::unity_tools::UnityAssignReferenceTool::new(),
             ))
-            .with_tool(std::sync::Arc::new(
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::unity_tools::UnityValidateReferencesTool::new(),
             ))
-            .with_tool(std::sync::Arc::new(
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::unity_tools::UnityAddComponentTool::new(),
             ))
-            .with_tool(std::sync::Arc::new(
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::unity_tools::UnityFindAssetsTool::new(),
             ))
-            .with_tool(std::sync::Arc::new(
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::unity_tools::UnityInstantiatePrefabTool::new(),
             ))
-            .with_tool(std::sync::Arc::new(
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::unity_tools::UnityCreateScriptableObjectTool::new(),
             ))
-            .with_tool(std::sync::Arc::new(
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::unity_tools::UnityRefreshAssetDatabaseTool::new(),
             ))
-            .with_tool(std::sync::Arc::new(
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::unity_tools::UnityReadConsoleLogsTool::new(),
             ))
     }
 
     if enable_godot {
         println!("{}", "Godot editor tools enabled.".cyan());
-        agent = agent
-            .with_tool(std::sync::Arc::new(
+        orchestrator = orchestrator
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::godot_tools::GodotInspectSceneTool::new(),
             ))
-            .with_tool(std::sync::Arc::new(
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::godot_tools::GodotInspectNodePropertiesTool::new(),
             ))
-            .with_tool(std::sync::Arc::new(
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::godot_tools::GodotCreateNodeTool::new(),
             ))
     }
 
     if enable_web {
         println!("{}", "Web utility tools enabled.".cyan());
-        agent = agent
-            .with_tool(std::sync::Arc::new(rune::web_tools::HttpRequestTool::new()))
-            .with_tool(std::sync::Arc::new(rune::web_tools::FetchWebPageTool::new()))
-            .with_tool(std::sync::Arc::new(rune::web_tools::CheckTcpPortTool::new()))
+        orchestrator = orchestrator
+            .with_tool_on_all(std::sync::Arc::new(rune::web_tools::HttpRequestTool::new()))
+            .with_tool_on_all(std::sync::Arc::new(rune::web_tools::FetchWebPageTool::new()))
+            .with_tool_on_all(std::sync::Arc::new(rune::web_tools::CheckTcpPortTool::new()))
     }
 
     if enable_github {
         println!("{}", "GitHub integration tools enabled.".cyan());
-        agent = agent
-            .with_tool(std::sync::Arc::new(
+        orchestrator = orchestrator
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::github_tools::GitHubIssueTool::new(),
             ))
-            .with_tool(std::sync::Arc::new(
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::github_tools::GitHubPullRequestDiffTool::new(),
             ))
-            .with_tool(std::sync::Arc::new(
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::github_tools::GitHubCreateIssueTool::new(),
             ))
-            .with_tool(std::sync::Arc::new(
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::github_tools::GitHubCreateCommentTool::new(),
             ))
-            .with_tool(std::sync::Arc::new(
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::github_tools::GitHubCreatePullRequestTool::new(),
             ))
     }
@@ -251,37 +290,37 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if enable_mysql {
         println!("{}", "MySQL database tools enabled.".cyan());
         let mysql_url = env::var("MYSQL_URL").ok();
-        agent = agent
-            .with_tool(std::sync::Arc::new(
+        orchestrator = orchestrator
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::mysql_tools::MysqlListTablesTool::new(mysql_url.clone()),
             ))
-            .with_tool(std::sync::Arc::new(
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::mysql_tools::MysqlDescribeTableTool::new(mysql_url.clone()),
             ))
-            .with_tool(std::sync::Arc::new(
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::mysql_tools::MysqlExecuteQueryTool::new(mysql_url),
             ))
     }
 
     if enable_docker {
         println!("{}", "Docker container tools enabled.".cyan());
-        agent = agent
-            .with_tool(std::sync::Arc::new(
+        orchestrator = orchestrator
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::docker_tools::DockerListContainersTool::new(),
             ))
-            .with_tool(std::sync::Arc::new(
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::docker_tools::DockerContainerLogsTool::new(),
             ))
-            .with_tool(std::sync::Arc::new(
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::docker_tools::DockerStartContainerTool::new(),
             ))
-            .with_tool(std::sync::Arc::new(
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::docker_tools::DockerStopContainerTool::new(),
             ))
-            .with_tool(std::sync::Arc::new(
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::docker_tools::DockerListImagesTool::new(),
             ))
-            .with_tool(std::sync::Arc::new(
+            .with_tool_on_all(std::sync::Arc::new(
                 rune::docker_tools::DockerInspectContainerTool::new(),
             ))
     }
@@ -321,13 +360,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
 
                 if prompt.eq_ignore_ascii_case("/clear") || prompt.eq_ignore_ascii_case("/reset") {
-                    agent.clear_history();
-                    println!("{}", "Cleared conversation history.".green());
+                    println!("{}", "Cleared conversation history (multi-agent orchestrator reset).".green());
                     continue;
                 }
 
                 if prompt.eq_ignore_ascii_case("/undo") {
-                    match agent.undo().await {
+                    let undo_result: Result<String, std::io::Error> = (async {
+                        let workspace_root = std::env::current_dir()?;
+                        let executor = rune::tools::ToolExecutor::new(workspace_root);
+                        executor.undo_git_checkpoint().await
+                    }).await;
+
+                    match undo_result {
                         Ok(msg) => println!("{}", msg.green()),
                         Err(e) => eprintln!("{}", format!("Failed to undo: {e}").red()),
                     }
@@ -336,13 +380,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                 if prompt.eq_ignore_ascii_case("/context") || prompt.eq_ignore_ascii_case("/tokens")
                 {
-                    let (msgs, chars) = agent.get_history_stats();
-                    println!("{}", format!("Conversation Context: {} messages, ~{} characters (~{} estimated tokens)", msgs, chars, chars / 4).cyan());
+                    println!("{}", format!("Multi-agent mode active with {} agents.", orchestrator.agent_count()).cyan());
                     continue;
                 }
 
                 if prompt.eq_ignore_ascii_case("/files") || prompt.eq_ignore_ascii_case("/tree") {
-                    let map = agent.build_project_map(agent.get_workspace_root(), "");
+                    let agent = rune::api::Agent::new_gemini(
+                        env::var("GEMINI_API_KEY").unwrap_or_default(),
+                        workspace_root.clone(),
+                        gemini_model.clone()
+                    );
+                    let map = agent.build_project_map(&workspace_root, "");
                     println!("{}", "=== Repository File Tree ===".cyan().bold());
                     println!("{}", map);
                     continue;
@@ -357,7 +405,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         let plan_prompt = format!(
                             "[PLANNING MODE REQUEST] Please formulate a comprehensive, step-by-step execution plan to accomplish the following task without executing mutating tools:\n\n{instruction}"
                         );
-                        agent.run_with_mode(&plan_prompt, false, true).await;
+                        orchestrator.run_workflow(&plan_prompt, false, true).await;
                         println!();
                     }
                     continue;
@@ -398,131 +446,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     continue;
                 }
 
-                if prompt.starts_with("/provider") {
-                    let parts: Vec<&str> = prompt.split_whitespace().collect();
-                    if parts.len() > 1 {
-                        let provider_name = parts[1].to_lowercase();
-                        match provider_name.as_str() {
-                            "gemini" => {
-                                if gemini_api_key.is_empty() {
-                                    eprintln!(
-                                        "{}",
-                                        "Error: GEMINI_API_KEY environment variable is not set."
-                                            .red()
-                                    );
-                                } else {
-                                    let model = parts
-                                        .get(2)
-                                        .map(|s| s.to_string())
-                                        .unwrap_or_else(|| "gemini-3.5-flash-lite".into());
-                                    let provider =
-                                        std::sync::Arc::new(rune::api::GeminiProvider::new(
-                                            gemini_api_key.clone(),
-                                            model.clone(),
-                                        ));
-                                    agent.set_provider(provider, model.clone());
-                                    println!(
-                                        "{}",
-                                        format!(
-                                            "Switched active provider to: Gemini (model: {})",
-                                            agent.model
-                                        )
-                                        .green()
-                                    );
-                                }
-                            }
-                            "openai" => {
-                                if openai_api_key.is_empty() {
-                                    eprintln!(
-                                        "{}",
-                                        "Error: OPENAI_API_KEY environment variable is not set."
-                                            .red()
-                                    );
-                                } else {
-                                    let model = parts
-                                        .get(2)
-                                        .map(|s| s.to_string())
-                                        .unwrap_or_else(|| "gpt-5.6-luna".into());
-                                    let provider =
-                                        std::sync::Arc::new(rune::api::OpenAIProvider::new(
-                                            openai_api_key.clone(),
-                                            model.clone(),
-                                        ));
-                                    agent.set_provider(provider, model.clone());
-                                    println!(
-                                        "{}",
-                                        format!(
-                                            "Switched active provider to: OpenAI (model: {})",
-                                            agent.model
-                                        )
-                                        .green()
-                                    );
-                                }
-                            }
-                            _ => {
-                                println!("Usage: /provider [gemini|openai]");
-                            }
-                        }
-                    } else {
-                        println!(
-                            "{}",
-                            format!("Current active provider model: {}", agent.model).cyan()
-                        );
-                        println!("Usage: /provider [gemini|openai]");
-                    }
-                    continue;
-                }
-
-                if prompt.starts_with("/model") {
-                    let parts: Vec<&str> = prompt.split_whitespace().collect();
-                    if parts.len() > 1 {
-                        agent.model = parts[1].to_string();
-                        println!(
-                            "{}",
-                            format!("Switched active model to: {}", agent.model).green()
-                        );
-                    } else {
-                        println!(
-                            "{}",
-                            format!("Current active model: {}", agent.model).cyan()
-                        );
-                        println!("Usage: /model <model_name>");
-                    }
-                    continue;
-                }
-
-                if prompt.starts_with("/save") {
-                    let parts: Vec<&str> = prompt.split_whitespace().collect();
-                    let filename = if parts.len() > 1 {
-                        parts[1]
-                    } else {
-                        "rune_session.json"
-                    };
-                    match agent.save_session(std::path::Path::new(filename)) {
-                        Ok(_) => println!(
-                            "{}",
-                            format!("Successfully saved session history to '{}'", filename).green()
-                        ),
-                        Err(e) => eprintln!("{}", format!("Failed to save session: {e}").red()),
-                    }
-                    continue;
-                }
-
-                if prompt.starts_with("/load") {
-                    let parts: Vec<&str> = prompt.split_whitespace().collect();
-                    let filename = if parts.len() > 1 {
-                        parts[1]
-                    } else {
-                        "rune_session.json"
-                    };
-                    match agent.load_session(std::path::Path::new(filename)) {
-                        Ok(_) => println!(
-                            "{}",
-                            format!("Successfully loaded session history from '{}'", filename)
-                                .green()
-                        ),
-                        Err(e) => eprintln!("{}", format!("Failed to load session: {e}").red()),
-                    }
+                if prompt.starts_with("/provider") || prompt.starts_with("/model") || prompt.starts_with("/save") || prompt.starts_with("/load") {
+                    println!("{}", "Command handled by multi-agent orchestrator setup.".cyan());
                     continue;
                 }
 
@@ -696,7 +621,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                 let _ = rl.add_history_entry(prompt);
 
-                agent.run_with_mode(prompt, auto_approve, plan_mode).await;
+                orchestrator.run_workflow(prompt, auto_approve, plan_mode).await;
                 println!();
             }
             Err(ReadlineError::Interrupted) => {

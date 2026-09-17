@@ -1,4 +1,5 @@
 pub mod api;
+pub mod agent;
 pub mod docker_tools;
 pub mod github_tools;
 pub mod godot_tools;
