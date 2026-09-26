@@ -65,7 +65,8 @@ try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12, [Net.SecurityProtocolType]::Tls13
     
     try {
-        Invoke-WebRequest -Uri $DownloadUrl -OutFile $zipPath -UseBasicParsing
+        $headers = @{ "User-Agent" = "Rune-Installer" }
+        Invoke-WebRequest -Uri $DownloadUrl -OutFile $zipPath -UseBasicParsing -Headers $headers
     } catch {
         Write-Color "[ERROR] Failed to download from $DownloadUrl" ([ConsoleColor]::Red)
         Write-Color $_.Exception.Message ([ConsoleColor]::Red)
