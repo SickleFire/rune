@@ -85,14 +85,6 @@ impl AgentTool for RecallMemoryTool {
         let store = MemoryStore::load();
         let fixes = store.search_fixes(query);
         let relations = store.query_relations(query);
-
-        let mut output = String::new();
-        output.push_str(&format!("Memory search results for '{}':\n\n", query));
-
-        // Preferences match
-        if let Some(pref) = store.get_preference(query) {
-            output.push_str(&format!("[Preference] {} = {}\n", query, pref));
-        }
         let q_lower = query.to_lowercase();
         let matching_prefs: Vec<(&String, &String)> = store
             .preferences
@@ -102,39 +94,50 @@ impl AgentTool for RecallMemoryTool {
                     && *k != query
             })
             .collect();
-        if !matching_prefs.is_empty() {
-            output.push_str("--- Preferences ---\n");
-            for (k, v) in matching_prefs {
-                output.push_str(&format!("{} = {}\n", k, v));
-            }
-        }
 
-        if !fixes.is_empty() {
-            output.push_str("--- Past Fixes ---\n");
-            for fix in fixes {
-                output.push_str(&format!(
-                    "Problem: {}\nSolution: {}\n\n",
-                    fix.problem, fix.solution
-                ));
-            }
-        }
+        let mut output = String::new();
+        output.push_str(&format!("Memory search results for '{}':\n\n", query));
 
-        if !relations.is_empty() {
-            output.push_str("--- File & Symbol Relations ---\n");
-            for rel in relations {
-                output.push_str(&format!(
-                    "File: {} -> Symbol: [{}] {} -> Target: {} (Notes: {})\n",
-                    rel.file_path,
-                    rel.relation_type,
-                    rel.related_symbol,
-                    rel.target_file,
-                    rel.notes
-                ));
+        if store.get_preference(query).is_none()
+            && matching_prefs.is_empty()
+            && fixes.is_empty()
+            && relations.is_empty()
+        {
+            output.push_str("No matching memories found.\n");
+        } else {
+            if let Some(pref) = store.get_preference(query) {
+                output.push_str(&format!("[Preference] {} = {}\n", query, pref));
             }
-        }
+            if !matching_prefs.is_empty() {
+                output.push_str("--- Preferences ---\n");
+                for (k, v) in matching_prefs {
+                    output.push_str(&format!("{} = {}\n", k, v));
+                }
+            }
 
-        if output.len() == format!("Memory search results for '{}':\n\n", query).len() {
-            output.push_str("No matching memories found.");
+            if !fixes.is_empty() {
+                output.push_str("--- Past Fixes ---\n");
+                for fix in fixes {
+                    output.push_str(&format!(
+                        "Problem: {}\nSolution: {}\n\n",
+                        fix.problem, fix.solution
+                    ));
+                }
+            }
+
+            if !relations.is_empty() {
+                output.push_str("--- File & Symbol Relations ---\n");
+                for rel in relations {
+                    output.push_str(&format!(
+                        "File: {} -> Symbol: [{}] {} -> Target: {} (Notes: {})\n",
+                        rel.file_path,
+                        rel.relation_type,
+                        rel.related_symbol,
+                        rel.target_file,
+                        rel.notes
+                    ));
+                }
+            }
         }
 
         output

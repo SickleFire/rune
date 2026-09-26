@@ -22,6 +22,20 @@
       "relation_type": "depends_on",
       "target_file": "src/lib.rs",
       "notes": "initializes modules"
+    },
+    {
+      "file_path": "src/main.rs",
+      "related_symbol": "main",
+      "relation_type": "depends_on",
+      "target_file": "src/lib.rs",
+      "notes": "initializes modules"
+    },
+    {
+      "file_path": "src/main.rs",
+      "related_symbol": "main",
+      "relation_type": "depends_on",
+      "target_file": "src/lib.rs",
+      "notes": "initializes modules"
     }
   ]
 }

@@ -72,11 +72,8 @@ impl MemoryStore {
         key: impl Into<String>,
         value: impl Into<String>,
     ) -> Result<(), String> {
-        let mut latest = Self::load();
-        latest.preferences.insert(key.into(), value.into());
-        latest.save()?;
-        *self = latest;
-        Ok(())
+        self.preferences.insert(key.into(), value.into());
+        self.save()
     }
 
     pub fn get_preference(&self, key: &str) -> Option<&String> {
