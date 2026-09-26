@@ -95,7 +95,9 @@ impl RuneConfig {
             Ok(c) => match c.try_deserialize::<RuneConfig>() {
                 Ok(cfg) => cfg,
                 Err(e) => {
-                    eprintln!("[Rune: Warning: Failed to parse rune.toml: {e}. Using defaults/env.]");
+                    eprintln!(
+                        "[Rune: Warning: Failed to parse rune.toml: {e}. Using defaults/env.]"
+                    );
                     RuneConfig::default()
                 }
             },

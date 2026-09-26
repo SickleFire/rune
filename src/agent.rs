@@ -217,10 +217,12 @@ mod tests {
                 },
             ],
         };
-        let provider: Arc<dyn crate::api::LLMProvider> = Arc::new(
-            crate::api::OpenAIProvider::new("test-key".into(), "test-model".into())
-        );
-        let orchestrator = MultiAgentOrchestrator::new(provider, std::path::PathBuf::from("."), config).unwrap();
+        let provider: Arc<dyn crate::api::LLMProvider> = Arc::new(crate::api::OpenAIProvider::new(
+            "test-key".into(),
+            "test-model".into(),
+        ));
+        let orchestrator =
+            MultiAgentOrchestrator::new(provider, std::path::PathBuf::from("."), config).unwrap();
         let tool = std::sync::Arc::new(crate::memory_tools::RememberPreferenceTool);
         let orchestrator_with_tool = orchestrator.with_tool_on_all(tool);
         assert_eq!(orchestrator_with_tool.agents.len(), 2);

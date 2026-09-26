@@ -6,6 +6,16 @@ You can install Rune automatically using the installer script included in the re
 curl -sSL https://raw.githubusercontent.com/SickleFire/rune/main/install.sh | bash
 ```
 
+### Automated Installation & Setup (Windows PowerShell)
+If you are on Windows, you can install Rune automatically and configure your Google Gemini API key and model using the PowerShell installer script:
+```powershell
+iex (iwr -useb https://raw.githubusercontent.com/SickleFire/rune/main/install.ps1)
+```
+Or if you already downloaded or cloned the repository, run the interactive setup script directly:
+```powershell
+.\setup-gemini.ps1
+```
+
 ### Custom Installation Directory
 By default, the script installs `rune` into `$HOME/.local/bin`. You can customize the install directory by setting the `INSTALL_DIR` environment variable:
 ```bash

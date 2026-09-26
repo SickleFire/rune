@@ -12,7 +12,9 @@ mod tests {
         let temp_dir = std::env::temp_dir().join(format!("rune_test_{}", uuid_or_random()));
         let _ = std::fs::create_dir_all(&temp_dir);
         let test_path = temp_dir.join("memory.json");
-        unsafe { std::env::set_var("RUNE_MEMORY_PATH", &test_path); }
+        unsafe {
+            std::env::set_var("RUNE_MEMORY_PATH", &test_path);
+        }
 
         let mut store = MemoryStore::default();
         let _ = store.set_preference("editor", "neovim");
@@ -34,9 +36,11 @@ mod tests {
         let rels = store.query_relations("send_request");
         assert_eq!(rels.len(), 1);
         assert_eq!(rels[0].target_file, "src/tools.rs");
-        
+
         let _ = std::fs::remove_dir_all(&temp_dir);
-        unsafe { std::env::remove_var("RUNE_MEMORY_PATH"); }
+        unsafe {
+            std::env::remove_var("RUNE_MEMORY_PATH");
+        }
     }
 
     #[tokio::test]
@@ -44,7 +48,9 @@ mod tests {
         let temp_dir = std::env::temp_dir().join(format!("rune_test_{}", uuid_or_random()));
         let _ = std::fs::create_dir_all(&temp_dir);
         let test_path = temp_dir.join("memory.json");
-        unsafe { std::env::set_var("RUNE_MEMORY_PATH", &test_path); }
+        unsafe {
+            std::env::set_var("RUNE_MEMORY_PATH", &test_path);
+        }
 
         let pref_tool = RememberPreferenceTool;
         let _res1 = pref_tool
@@ -85,7 +91,9 @@ mod tests {
         assert!(res4.contains("Successfully recorded file and symbol relationship"));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
-        unsafe { std::env::remove_var("RUNE_MEMORY_PATH"); }
+        unsafe {
+            std::env::remove_var("RUNE_MEMORY_PATH");
+        }
     }
 
     fn uuid_or_random() -> u64 {
