@@ -6,6 +6,10 @@
     {
       "problem": "null pointer in unity component",
       "solution": "check if component is null before invoking"
+    },
+    {
+      "problem": "null pointer in unity component",
+      "solution": "check if component is null before invoking"
     }
   ],
   "file_relations": [
@@ -15,6 +19,20 @@
       "relation_type": "calls",
       "target_file": "src/tools.rs",
       "notes": "executes tool"
+    },
+    {
+      "file_path": "src/main.rs",
+      "related_symbol": "main",
+      "relation_type": "depends_on",
+      "target_file": "src/lib.rs",
+      "notes": "initializes modules"
+    },
+    {
+      "file_path": "src/main.rs",
+      "related_symbol": "main",
+      "relation_type": "depends_on",
+      "target_file": "src/lib.rs",
+      "notes": "initializes modules"
     },
     {
       "file_path": "src/main.rs",

@@ -90,8 +90,7 @@ impl AgentTool for RecallMemoryTool {
             .preferences
             .iter()
             .filter(|(k, v)| {
-                (k.to_lowercase().contains(&q_lower) || v.to_lowercase().contains(&q_lower))
-                    && *k != query
+                k.to_lowercase().contains(&q_lower) || v.to_lowercase().contains(&q_lower)
             })
             .collect();
 
@@ -107,8 +106,8 @@ impl AgentTool for RecallMemoryTool {
         } else {
             if let Some(pref) = store.get_preference(query) {
                 output.push_str(&format!("[Preference] {} = {}\n", query, pref));
-            }
-            if !matching_prefs.is_empty() {
+            } else if !matching_prefs.is_empty() {
+                // If query matched partial/value rather than exact key, show matching preferences
                 output.push_str("--- Preferences ---\n");
                 for (k, v) in matching_prefs {
                     output.push_str(&format!("{} = {}\n", k, v));
