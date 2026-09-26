@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 use sqlx::mysql::MySqlPoolOptions;
 use sqlx::{Column, Row};
+use std::time::Duration;
 
 pub struct MysqlListTablesTool {
     connection_url: String,
@@ -39,6 +40,7 @@ impl AgentTool for MysqlListTablesTool {
     async fn execute(&self, _args: Value) -> String {
         let pool = match MySqlPoolOptions::new()
             .max_connections(5)
+            .acquire_timeout(Duration::from_secs(2))
             .connect(&self.connection_url)
             .await
         {
@@ -109,6 +111,7 @@ impl AgentTool for MysqlExecuteQueryTool {
 
         let pool = match MySqlPoolOptions::new()
             .max_connections(5)
+            .acquire_timeout(Duration::from_secs(2))
             .connect(&self.connection_url)
             .await
         {
@@ -204,6 +207,7 @@ impl AgentTool for MysqlDescribeTableTool {
 
         let pool = match MySqlPoolOptions::new()
             .max_connections(5)
+            .acquire_timeout(Duration::from_secs(2))
             .connect(&self.connection_url)
             .await
         {
