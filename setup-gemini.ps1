@@ -17,7 +17,7 @@ $ErrorActionPreference = "Stop"
 
 function Write-Color {
     param([string]$Text, [ConsoleColor]$Color = [ConsoleColor]::White)
-    $oldColor = [Console]ForegroundColor
+    $oldColor = [Console]::ForegroundColor
     [Console]::ForegroundColor = $Color
     [Console]::WriteLine($Text)
     [Console]::ForegroundColor = $oldColor
