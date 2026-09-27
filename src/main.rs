@@ -286,7 +286,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let enable_godot = args.contains(&"--godot".to_string());
     let enable_web = args.contains(&"--web".to_string());
     let enable_github = args.contains(&"--github".to_string()) || env::var("GITHUB_TOKEN").is_ok();
-    let enable_mysql = args.contains(&"--mysql".to_string());
+    let enable_mysql = args.contains(&"--mysql".to_string()) || config.mysql_url.as_deref().map_or(false, |s| !s.is_empty()) || env::var("MYSQL_URL").map_or(false, |s| !s.is_empty());
     let enable_docker = args.contains(&"--docker".to_string());
 
     // Always enable core persistent memory and session memory tools

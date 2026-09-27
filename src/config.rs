@@ -17,6 +17,7 @@ pub struct RuneConfig {
     pub lm_studio_model: Option<String>,
     pub architect_model: Option<String>,
     pub coder_model: Option<String>,
+    pub mysql_url: Option<String>,
 }
 
 impl Default for RuneConfig {
@@ -35,6 +36,7 @@ impl Default for RuneConfig {
             lm_studio_model: Some("local-model".to_string()),
             architect_model: None,
             coder_model: None,
+            mysql_url: None,
         }
     }
 }
@@ -61,7 +63,7 @@ impl RuneConfig {
             while let Some(d) = dir {
                 let candidate = d.join(config_filename);
                 if candidate.exists() {
-                    found_path = Some(candidate);
+                    found_path = Some(candidate.to_path_buf());
                     break;
                 }
                 dir = d.parent();
@@ -161,6 +163,13 @@ impl RuneConfig {
             if let Ok(val) = env::var("CODER_MODEL") {
                 if !val.is_empty() {
                     config.coder_model = Some(val);
+                }
+            }
+        }
+        if config.mysql_url.as_deref().unwrap_or("").is_empty() {
+            if let Ok(val) = env::var("MYSQL_URL") {
+                if !val.is_empty() {
+                    config.mysql_url = Some(val);
                 }
             }
         }
