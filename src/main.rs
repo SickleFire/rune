@@ -550,8 +550,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     continue;
                 }
 
+                if prompt.eq_ignore_ascii_case("/model") || prompt.starts_with("/model ") {
+                    let parts: Vec<&str> = prompt.split_whitespace().collect();
+                    if parts.len() > 1 {
+                        let new_model = parts[1].to_string();
+                        orchestrator.set_model_all(new_model.clone());
+                        println!(
+                            "{}",
+                            format!("Active model updated to: {}", new_model).green()
+                        );
+                    } else {
+                        println!(
+                            "{}",
+                            format!("Current active model(s): {}", orchestrator.get_active_models_summary()).cyan()
+                        );
+                    }
+                    continue;
+                }
+
                 if prompt.starts_with("/provider")
-                    || prompt.starts_with("/model")
                     || prompt.starts_with("/save")
                     || prompt.starts_with("/load")
                 {

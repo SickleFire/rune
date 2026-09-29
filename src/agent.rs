@@ -147,6 +147,52 @@ impl MultiAgentOrchestrator {
             .collect();
         self
     }
+
+    pub fn set_model_all(&mut self, model: String) {
+        for (i, agent) in self.agents.iter_mut().enumerate() {
+            agent.model = model.clone();
+            if let Some(cfg) = self.config.agents.get_mut(i) {
+                cfg.model = model.clone();
+            }
+        }
+    }
+
+    pub fn set_model_for_role(&mut self, role: AgentRole, model: String) -> bool {
+        let mut found = false;
+        let is_single = self.agents.len() == 1;
+        for (i, agent) in self.agents.iter_mut().enumerate() {
+            let role_matches = if let Some(cfg) = self.config.agents.get(i) {
+                cfg.role == role
+            } else {
+                false
+            };
+            if role_matches || (is_single && role == AgentRole::Coder) {
+                agent.model = model.clone();
+                if let Some(cfg) = self.config.agents.get_mut(i) {
+                    cfg.model = model.clone();
+                }
+                found = true;
+            }
+        }
+        found
+    }
+
+    pub fn get_active_models_summary(&self) -> String {
+        if self.agents.len() == 1 {
+            format!("Model: {}", self.agents[0].model)
+        } else {
+            let mut parts = Vec::new();
+            for (i, agent) in self.agents.iter().enumerate() {
+                let role_name = if let Some(cfg) = self.config.agents.get(i) {
+                    format!("{:?}", cfg.role)
+                } else {
+                    format!("Agent {}", i + 1)
+                };
+                parts.push(format!("{}: {}", role_name, agent.model));
+            }
+            parts.join(", ")
+        }
+    }
 }
 
 #[cfg(test)]
