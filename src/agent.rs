@@ -157,6 +157,16 @@ impl MultiAgentOrchestrator {
         }
     }
 
+    pub fn set_provider_all(&mut self, provider: Arc<dyn LLMProvider>, model: Option<String>) {
+        for (i, agent) in self.agents.iter_mut().enumerate() {
+            let active_model = model.clone().unwrap_or_else(|| agent.model.clone());
+            agent.set_provider(Arc::clone(&provider), active_model.clone());
+            if let Some(cfg) = self.config.agents.get_mut(i) {
+                cfg.model = active_model;
+            }
+        }
+    }
+
     pub fn set_model_for_role(&mut self, role: AgentRole, model: String) -> bool {
         let mut found = false;
         let is_single = self.agents.len() == 1;
