@@ -763,6 +763,32 @@ impl LLMProvider for GroqProvider {
     }
 }
 
+pub struct OpenRouterProvider {
+    inner: OpenAIProvider,
+}
+
+impl OpenRouterProvider {
+    pub fn new(api_key: String, model: String) -> Self {
+        Self {
+            inner: OpenAIProvider::new(api_key, model)
+                .with_base_url("https://openrouter.ai/api/v1"),
+        }
+    }
+}
+
+#[async_trait]
+impl LLMProvider for OpenRouterProvider {
+    async fn complete(
+        &self,
+        history: &[CanonicalMessage],
+        tools: &[FunctionDeclaration],
+        model: &str,
+        on_text: &(dyn Fn(String) + Send + Sync),
+    ) -> Result<ProviderResponse, Box<dyn std::error::Error + Send + Sync>> {
+        self.inner.complete(history, tools, model, on_text).await
+    }
+}
+
 pub struct Agent {
     provider: Arc<dyn LLMProvider>,
     pub model: String,
@@ -1715,6 +1741,14 @@ mod tests {
             GroqProvider::normalize_model("meta-llama/llama-4-scout-17b-16e-instruct"),
             "meta-llama/llama-4-scout-17b-16e-instruct"
         );
+    }
+
+    #[test]
+    fn openrouter_provider_uses_openrouter_openai_compatible_endpoint() {
+        let provider = OpenRouterProvider::new("test-key".into(), "openai/gpt-4o-mini".into());
+
+        assert_eq!(provider.inner.base_url, "https://openrouter.ai/api/v1");
+        assert_eq!(provider.inner.model, "openai/gpt-4o-mini");
     }
 
     #[test]

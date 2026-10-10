@@ -53,7 +53,8 @@ iex (iwr -useb https://raw.githubusercontent.com/SickleFire/rune/main/install.ps
 
 ### Configuration & Environment Management
 
-Rune supports configuring API keys, models, and local endpoints via a streamlined `rune.toml` configuration file in your project root or home directory, with full backward compatibility for environment variables (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `GROQ_API_KEY`, `ANTHROPIC_API_KEY`, `RUNE_*`). Groq uses its OpenAI-compatible chat-completions API.
+Rune supports configuring API keys, models, and local endpoints via a streamlined `rune.toml` configuration file in your project root or home directory, with full backward compatibility for environment variables (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `RUNE_*`). Groq and OpenRouter use their OpenAI-compatible chat-completions APIs.
+To use OpenRouter, set `provider = "openrouter"` and provide `openrouter_api_key` and `openrouter_model` in `rune.toml`, or set `OPENROUTER_API_KEY` and optionally `OPENROUTER_MODEL` in the environment.
 
 1. Copy the sample configuration file (or run the setup script):
    ```bash

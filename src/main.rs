@@ -146,6 +146,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .clone()
         .unwrap_or("openai/gpt-oss-120b".to_string());
 
+    let openrouter_api_key = config.openrouter_api_key.clone().unwrap_or_default();
+    let openrouter_model = config
+        .openrouter_model
+        .clone()
+        .unwrap_or("openai/gpt-4o-mini".to_string());
+
     let anthropic_api_key = config.anthropic_api_key.clone().unwrap_or_default();
     let anthropic_model = config
         .anthropic_model
@@ -174,6 +180,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Arc::new(rune::api::GroqProvider::new(
             groq_api_key.clone(),
             groq_model.clone(),
+        ))
+    } else if provider_name.eq_ignore_ascii_case("openrouter")
+        || (!openrouter_api_key.is_empty() && provider_name == "auto")
+    {
+        Arc::new(rune::api::OpenRouterProvider::new(
+            openrouter_api_key.clone(),
+            openrouter_model.clone(),
         ))
     } else if provider_name.eq_ignore_ascii_case("anthropic")
         || (!anthropic_api_key.is_empty() && provider_name == "auto")
@@ -225,9 +238,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
             groq_api_key.clone(),
             groq_model.clone(),
         ))
+    } else if !openrouter_api_key.is_empty() {
+        Arc::new(rune::api::OpenRouterProvider::new(
+            openrouter_api_key.clone(),
+            openrouter_model.clone(),
+        ))
     } else {
         panic!(
-            "Please configure at least one LLM provider (Gemini, OpenAI, Groq, Anthropic, Ollama, or LM Studio) via rune.toml or environment variables."
+            "Please configure at least one LLM provider (Gemini, OpenAI, Groq, OpenRouter, Anthropic, Ollama, or LM Studio) via rune.toml or environment variables."
         );
     };
 
@@ -661,6 +679,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     model,
                                 )
                             }
+                            "openrouter" => {
+                                let key = config.openrouter_api_key.clone().unwrap_or_else(|| {
+                                    env::var("OPENROUTER_API_KEY").unwrap_or_default()
+                                });
+                                let model = model_arg
+                                    .clone()
+                                    .unwrap_or_else(|| openrouter_model.clone());
+                                (
+                                    Arc::new(rune::api::OpenRouterProvider::new(
+                                        key,
+                                        model.clone(),
+                                    )),
+                                    model,
+                                )
+                            }
                             "anthropic" => {
                                 let key = config.anthropic_api_key.clone().unwrap_or_else(|| {
                                     env::var("ANTHROPIC_API_KEY").unwrap_or_default()
@@ -720,7 +753,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 )
                             }
                             _ => {
-                                println!("{}", format!("Unknown provider '{}'. Supported: gemini, openai, groq, anthropic, ollama, lmstudio", parts[1]).red());
+                                println!("{}", format!("Unknown provider '{}'. Supported: gemini, openai, groq, openrouter, anthropic, ollama, lmstudio", parts[1]).red());
                                 continue;
                             }
                         };
@@ -746,7 +779,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         );
                         println!(
                             "{}",
-                            "Usage: /provider [gemini|openai|anthropic|ollama|lmstudio] [model]"
+                            "Usage: /provider [gemini|openai|groq|openrouter|anthropic|ollama|lmstudio] [model]"
                                 .bright_black()
                         );
                     }
@@ -933,6 +966,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         .groq_model
                         .clone()
                         .unwrap_or_else(|| "openai/gpt-oss-120b".to_string());
+                    let current_openrouter_key =
+                        config.openrouter_api_key.clone().unwrap_or_default();
+                    let current_openrouter_model = config
+                        .openrouter_model
+                        .clone()
+                        .unwrap_or_else(|| "openai/gpt-4o-mini".to_string());
                     let current_anthropic_key =
                         config.anthropic_api_key.clone().unwrap_or_default();
                     let current_anthropic_model = config
@@ -943,12 +982,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                     println!("\n[1/4] Provider & API Keys:");
                     let new_provider = prompt_field(
-                        "Default Provider (gemini|openai|groq|anthropic|ollama|lmstudio)",
+                        "Default Provider (gemini|openai|groq|openrouter|anthropic|ollama|lmstudio)",
                         &current_provider,
                     );
                     let new_gemini_key = prompt_field("Gemini API Key", &current_gemini_key);
                     let new_openai_key = prompt_field("OpenAI API Key", &current_openai_key);
                     let new_groq_key = prompt_field("Groq API Key", &current_groq_key);
+                    let new_openrouter_key =
+                        prompt_field("OpenRouter API Key", &current_openrouter_key);
                     let new_anthropic_key =
                         prompt_field("Anthropic API Key", &current_anthropic_key);
 
@@ -956,6 +997,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     let new_gemini_model = prompt_field("Gemini Model", &current_gemini_model);
                     let new_openai_model = prompt_field("OpenAI Model", &current_openai_model);
                     let new_groq_model = prompt_field("Groq Model", &current_groq_model);
+                    let new_openrouter_model =
+                        prompt_field("OpenRouter Model", &current_openrouter_model);
                     let new_anthropic_model =
                         prompt_field("Anthropic Model", &current_anthropic_model);
 
@@ -973,12 +1016,14 @@ provider = "{new_provider}"
 gemini_api_key = "{new_gemini_key}"
 openai_api_key = "{new_openai_key}"
 groq_api_key = "{new_groq_key}"
+openrouter_api_key = "{new_openrouter_key}"
 anthropic_api_key = "{new_anthropic_key}"
 
 # Model Choices
 gemini_model = "{new_gemini_model}"
 openai_model = "{new_openai_model}"
 groq_model = "{new_groq_model}"
+openrouter_model = "{new_openrouter_model}"
 anthropic_model = "{new_anthropic_model}"
 
 # Local Endpoints (Ollama / LM Studio)
@@ -1048,7 +1093,8 @@ mysql_url = "{new_mysql_url}"
                     println!("  4) anthropic (Anthropic Claude API)");
                     println!("  5) ollama (Local Ollama)");
                     println!("  6) lmstudio (Local LM Studio)");
-                    print!("Enter choice [1-6, default: 1]: ");
+                    println!("  7) openrouter (OpenRouter API)");
+                    print!("Enter choice [1-7, default: 1]: ");
                     use std::io::Write;
                     std::io::stdout().flush().unwrap();
 
@@ -1062,6 +1108,7 @@ mysql_url = "{new_mysql_url}"
                         "4" | "anthropic" => ("anthropic", "claude-3-5-sonnet"),
                         "5" | "ollama" => ("ollama", "llama3"),
                         "6" | "lmstudio" => ("lmstudio", "local-model"),
+                        "7" | "openrouter" => ("openrouter", "openai/gpt-4o-mini"),
                         _ => ("gemini", "gemini-3.5-flash-lite"),
                     };
 
@@ -1109,12 +1156,14 @@ provider = "{provider}"
 gemini_api_key = "{}"
 openai_api_key = "{}"
 groq_api_key = "{}"
+openrouter_api_key = "{}"
 anthropic_api_key = "{}"
 
 # Model Choices
 gemini_model = "gemini-3.5-flash-lite"
 openai_model = "gpt-5.6-luna"
 groq_model = "openai/gpt-oss-120b"
+openrouter_model = "openai/gpt-4o-mini"
 anthropic_model = "claude-3-5-sonnet"
 
 # Local Endpoints (Ollama / LM Studio)
@@ -1131,6 +1180,11 @@ coder_model = "gpt-5.6-luna"
                         if provider == "gemini" { key_val } else { "" },
                         if provider == "openai" { key_val } else { "" },
                         if provider == "groq" { key_val } else { "" },
+                        if provider == "openrouter" {
+                            key_val
+                        } else {
+                            ""
+                        },
                         if provider == "anthropic" { key_val } else { "" }
                     );
 
@@ -1168,6 +1222,11 @@ coder_model = "gpt-5.6-luna"
                         toml_content = toml_content.replace(
                             r#"groq_model = "openai/gpt-oss-120b""#,
                             &format!(r#"groq_model = "{}""#, chosen_model),
+                        );
+                    } else if provider == "openrouter" {
+                        toml_content = toml_content.replace(
+                            r#"openrouter_model = "openai/gpt-4o-mini""#,
+                            &format!(r#"openrouter_model = "{}""#, chosen_model),
                         );
                     } else if provider == "anthropic" {
                         toml_content = toml_content.replace(
@@ -1224,7 +1283,7 @@ coder_model = "gpt-5.6-luna"
                         "/execute".green()
                     );
                     println!(
-                        "  - {:<22} : Switch or view LLM provider (/provider [gemini|openai] [model])",
+                        "  - {:<22} : Switch or view LLM provider (/provider [gemini|openai|groq|openrouter] [model])",
                         "/provider".green()
                     );
                     println!(
