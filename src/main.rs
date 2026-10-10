@@ -490,7 +490,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let history_file = env::temp_dir().join(".rune_history");
     let _ = rl.load_history(&history_file);
 
-    println!("{}", "=== Rune Coding Harness ===".cyan().bold());
+    let ascii_art = r#"
+         .  :  *  .
+       ╔══════════╗
+       ║  ██║     ║
+       ║  ██║██╗  ║
+       ║  ██║ ╚██╗║
+       ║  ██║██╗  ║
+       ║  ██║ ╚██╗║
+       ║  ██║  ╚═╝║
+       ║  ██║     ║
+       ╚══════════╝
+         '  :  *  '
+"#;
+    println!("{}", ascii_art.cyan().bold());
     println!(
         "{}",
         "Type your prompt, or use /help for available commands.".bright_black()
