@@ -288,7 +288,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let enable_godot = args.contains(&"--godot".to_string());
     let enable_web = args.contains(&"--web".to_string());
     let enable_github = args.contains(&"--github".to_string()) || env::var("GITHUB_TOKEN").is_ok();
-    let enable_mysql = args.contains(&"--mysql".to_string()) || config.mysql_url.as_deref().map_or(false, |s| !s.is_empty()) || env::var("MYSQL_URL").map_or(false, |s| !s.is_empty());
+    let enable_mysql = args.contains(&"--mysql".to_string())
+        || config.mysql_url.as_deref().map_or(false, |s| !s.is_empty())
+        || env::var("MYSQL_URL").map_or(false, |s| !s.is_empty());
     let enable_docker = args.contains(&"--docker".to_string());
 
     // Always enable core persistent memory and session memory tools
@@ -303,7 +305,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         ));
 
     if enable_unity_lite {
-        println!("{}", "Unity-lite editor tools enabled (inspection, validation & logs).".cyan());
+        println!(
+            "{}",
+            "Unity-lite editor tools enabled (inspection, validation & logs).".cyan()
+        );
         orchestrator = orchestrator
             .with_tool_on_all(std::sync::Arc::new(
                 rune::unity_tools::UnityInspectSceneTool::new(),
@@ -584,7 +589,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     } else {
                         println!(
                             "{}",
-                            format!("Current active model(s): {}", orchestrator.get_active_models_summary()).cyan()
+                            format!(
+                                "Current active model(s): {}",
+                                orchestrator.get_active_models_summary()
+                            )
+                            .cyan()
                         );
                     }
                     continue;
@@ -596,31 +605,91 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         let provider_arg = parts[1].to_lowercase();
                         let model_arg = parts.get(2).map(|s| s.to_string());
 
-                        let (new_provider, _): (Arc<dyn LLMProvider>, String) = match provider_arg.as_str() {
+                        let (new_provider, _): (Arc<dyn LLMProvider>, String) = match provider_arg
+                            .as_str()
+                        {
                             "gemini" => {
-                                let key = config.gemini_api_key.clone().unwrap_or_else(|| env::var("GEMINI_API_KEY").unwrap_or_default());
-                                let model = model_arg.clone().unwrap_or_else(|| gemini_model.clone());
-                                (Arc::new(rune::api::GeminiProvider::new(key, model.clone())), model)
+                                let key = config.gemini_api_key.clone().unwrap_or_else(|| {
+                                    env::var("GEMINI_API_KEY").unwrap_or_default()
+                                });
+                                let model =
+                                    model_arg.clone().unwrap_or_else(|| gemini_model.clone());
+                                (
+                                    Arc::new(rune::api::GeminiProvider::new(key, model.clone())),
+                                    model,
+                                )
                             }
                             "openai" => {
-                                let key = config.openai_api_key.clone().unwrap_or_else(|| env::var("OPENAI_API_KEY").unwrap_or_default());
-                                let model = model_arg.clone().unwrap_or_else(|| openai_model.clone());
-                                (Arc::new(rune::api::OpenAIProvider::new(key, model.clone()).with_reasoning_effort("none")), model)
+                                let key = config.openai_api_key.clone().unwrap_or_else(|| {
+                                    env::var("OPENAI_API_KEY").unwrap_or_default()
+                                });
+                                let model =
+                                    model_arg.clone().unwrap_or_else(|| openai_model.clone());
+                                (
+                                    Arc::new(
+                                        rune::api::OpenAIProvider::new(key, model.clone())
+                                            .with_reasoning_effort("none"),
+                                    ),
+                                    model,
+                                )
                             }
                             "anthropic" => {
-                                let key = config.anthropic_api_key.clone().unwrap_or_else(|| env::var("ANTHROPIC_API_KEY").unwrap_or_default());
-                                let model = model_arg.clone().unwrap_or_else(|| anthropic_model.clone());
-                                (Arc::new(rune::api::OpenAIProvider::new(key, model.clone()).with_reasoning_effort("none")), model)
+                                let key = config.anthropic_api_key.clone().unwrap_or_else(|| {
+                                    env::var("ANTHROPIC_API_KEY").unwrap_or_default()
+                                });
+                                let model =
+                                    model_arg.clone().unwrap_or_else(|| anthropic_model.clone());
+                                (
+                                    Arc::new(
+                                        rune::api::OpenAIProvider::new(key, model.clone())
+                                            .with_reasoning_effort("none"),
+                                    ),
+                                    model,
+                                )
                             }
                             "ollama" => {
-                                let _base_url = config.ollama_base_url.as_deref().unwrap_or("http://localhost:11434");
-                                let model = model_arg.clone().unwrap_or_else(|| config.ollama_model.clone().unwrap_or_else(|| "llama3".to_string()));
-                                (Arc::new(rune::api::OpenAIProvider::new("ollama-local".into(), model.clone()).with_reasoning_effort("none")), model)
+                                let _base_url = config
+                                    .ollama_base_url
+                                    .as_deref()
+                                    .unwrap_or("http://localhost:11434");
+                                let model = model_arg.clone().unwrap_or_else(|| {
+                                    config
+                                        .ollama_model
+                                        .clone()
+                                        .unwrap_or_else(|| "llama3".to_string())
+                                });
+                                (
+                                    Arc::new(
+                                        rune::api::OpenAIProvider::new(
+                                            "ollama-local".into(),
+                                            model.clone(),
+                                        )
+                                        .with_reasoning_effort("none"),
+                                    ),
+                                    model,
+                                )
                             }
                             "lmstudio" => {
-                                let _base_url = config.lm_studio_base_url.as_deref().unwrap_or("http://localhost:1234/v1");
-                                let model = model_arg.clone().unwrap_or_else(|| config.lm_studio_model.clone().unwrap_or_else(|| "local-model".to_string()));
-                                (Arc::new(rune::api::OpenAIProvider::new("lm-studio-local".into(), model.clone()).with_reasoning_effort("none")), model)
+                                let _base_url = config
+                                    .lm_studio_base_url
+                                    .as_deref()
+                                    .unwrap_or("http://localhost:1234/v1");
+                                let model = model_arg.clone().unwrap_or_else(|| {
+                                    config
+                                        .lm_studio_model
+                                        .clone()
+                                        .unwrap_or_else(|| "local-model".to_string())
+                                });
+                                (
+                                    Arc::new(
+                                        rune::api::OpenAIProvider::new(
+                                            "lm-studio-local".into(),
+                                            model.clone(),
+                                        )
+                                        .with_reasoning_effort("none"),
+                                    ),
+                                    model,
+                                )
                             }
                             _ => {
                                 println!("{}", format!("Unknown provider '{}'. Supported: gemini, openai, anthropic, ollama, lmstudio", parts[1]).red());
@@ -631,21 +700,32 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         orchestrator.set_provider_all(new_provider, model_arg);
                         println!(
                             "{}",
-                            format!("Switched provider to '{}' (active models: {})", provider_arg, orchestrator.get_active_models_summary()).green()
+                            format!(
+                                "Switched provider to '{}' (active models: {})",
+                                provider_arg,
+                                orchestrator.get_active_models_summary()
+                            )
+                            .green()
                         );
                     } else {
                         println!(
                             "{}",
-                            format!("Current provider / model(s): {}", orchestrator.get_active_models_summary()).cyan()
+                            format!(
+                                "Current provider / model(s): {}",
+                                orchestrator.get_active_models_summary()
+                            )
+                            .cyan()
                         );
-                        println!("{}", "Usage: /provider [gemini|openai|anthropic|ollama|lmstudio] [model]".bright_black());
+                        println!(
+                            "{}",
+                            "Usage: /provider [gemini|openai|anthropic|ollama|lmstudio] [model]"
+                                .bright_black()
+                        );
                     }
                     continue;
                 }
 
-                if prompt.starts_with("/save")
-                    || prompt.starts_with("/load")
-                {
+                if prompt.starts_with("/save") || prompt.starts_with("/load") {
                     println!(
                         "{}",
                         "Command handled by multi-agent orchestrator setup.".cyan()
@@ -773,13 +853,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 if prompt.eq_ignore_ascii_case("/config") || prompt.starts_with("/config ") {
                     let target_path = std::path::Path::new("rune.toml");
 
-                    println!("{}", "=== Rune Configuration Editor (/config) ===".cyan().bold());
+                    println!(
+                        "{}",
+                        "=== Rune Configuration Editor (/config) ===".cyan().bold()
+                    );
                     println!("Current rune.toml path: {}", target_path.display());
-                    println!("You can update settings interactively. Press Enter to keep current value.");
+                    println!(
+                        "You can update settings interactively. Press Enter to keep current value."
+                    );
 
                     // Helper closure for prompting
                     let prompt_field = |label: &str, current_val: &str| -> String {
-                        print!("  {} [{}] : ", label, if current_val.is_empty() { "(empty)" } else { current_val });
+                        print!(
+                            "  {} [{}] : ",
+                            label,
+                            if current_val.is_empty() {
+                                "(empty)"
+                            } else {
+                                current_val
+                            }
+                        );
                         use std::io::Write;
                         std::io::stdout().flush().unwrap();
                         let mut input = String::new();
@@ -793,25 +886,43 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     };
 
                     // Parse existing config or extract values simply
-                    let current_provider = config.provider.clone().unwrap_or_else(|| "gemini".to_string());
+                    let current_provider = config
+                        .provider
+                        .clone()
+                        .unwrap_or_else(|| "gemini".to_string());
                     let current_gemini_key = config.gemini_api_key.clone().unwrap_or_default();
-                    let current_gemini_model = config.gemini_model.clone().unwrap_or_else(|| "gemini-3.5-flash-lite".to_string());
+                    let current_gemini_model = config
+                        .gemini_model
+                        .clone()
+                        .unwrap_or_else(|| "gemini-3.5-flash-lite".to_string());
                     let current_openai_key = config.openai_api_key.clone().unwrap_or_default();
-                    let current_openai_model = config.openai_model.clone().unwrap_or_else(|| "gpt-5.6-luna".to_string());
-                    let current_anthropic_key = config.anthropic_api_key.clone().unwrap_or_default();
-                    let current_anthropic_model = config.anthropic_model.clone().unwrap_or_else(|| "claude-3-5-sonnet".to_string());
+                    let current_openai_model = config
+                        .openai_model
+                        .clone()
+                        .unwrap_or_else(|| "gpt-5.6-luna".to_string());
+                    let current_anthropic_key =
+                        config.anthropic_api_key.clone().unwrap_or_default();
+                    let current_anthropic_model = config
+                        .anthropic_model
+                        .clone()
+                        .unwrap_or_else(|| "claude-3-5-sonnet".to_string());
                     let current_mysql_url = config.mysql_url.clone().unwrap_or_default();
 
                     println!("\n[1/4] Provider & API Keys:");
-                    let new_provider = prompt_field("Default Provider (gemini|openai|anthropic|ollama|lmstudio)", &current_provider);
+                    let new_provider = prompt_field(
+                        "Default Provider (gemini|openai|anthropic|ollama|lmstudio)",
+                        &current_provider,
+                    );
                     let new_gemini_key = prompt_field("Gemini API Key", &current_gemini_key);
                     let new_openai_key = prompt_field("OpenAI API Key", &current_openai_key);
-                    let new_anthropic_key = prompt_field("Anthropic API Key", &current_anthropic_key);
+                    let new_anthropic_key =
+                        prompt_field("Anthropic API Key", &current_anthropic_key);
 
                     println!("\n[2/4] Models:");
                     let new_gemini_model = prompt_field("Gemini Model", &current_gemini_model);
                     let new_openai_model = prompt_field("OpenAI Model", &current_openai_model);
-                    let new_anthropic_model = prompt_field("Anthropic Model", &current_anthropic_model);
+                    let new_anthropic_model =
+                        prompt_field("Anthropic Model", &current_anthropic_model);
 
                     println!("\n[3/4] Database & Local Endpoints:");
                     let new_mysql_url = prompt_field("MySQL URL (optional)", &current_mysql_url);
@@ -851,8 +962,19 @@ mysql_url = "{new_mysql_url}"
 
                     match std::fs::write(target_path, config_content) {
                         Ok(_) => {
-                            println!("{}", format!("Successfully updated rune.toml at {}", target_path.display()).green().bold());
-                            println!("{}", "Restart Rune or use /provider to apply changes.".cyan());
+                            println!(
+                                "{}",
+                                format!(
+                                    "Successfully updated rune.toml at {}",
+                                    target_path.display()
+                                )
+                                .green()
+                                .bold()
+                            );
+                            println!(
+                                "{}",
+                                "Restart Rune or use /provider to apply changes.".cyan()
+                            );
                         }
                         Err(e) => {
                             eprintln!("{}", format!("Failed to write rune.toml: {e}").red());
@@ -864,15 +986,24 @@ mysql_url = "{new_mysql_url}"
                 if prompt.eq_ignore_ascii_case("/init") || prompt.starts_with("/init ") {
                     let target_path = std::path::Path::new("rune.toml");
                     if target_path.exists() {
-                        println!("{}", "rune.toml already exists in the current directory. Overwrite? (y/N): ".yellow());
+                        println!(
+                            "{}",
+                            "rune.toml already exists in the current directory. Overwrite? (y/N): "
+                                .yellow()
+                        );
                         let mut confirm = String::new();
-                        if std::io::stdin().read_line(&mut confirm).is_err() || !confirm.trim().eq_ignore_ascii_case("y") {
+                        if std::io::stdin().read_line(&mut confirm).is_err()
+                            || !confirm.trim().eq_ignore_ascii_case("y")
+                        {
                             println!("{}", "Cancelled rune.toml initialization.".yellow());
                             continue;
                         }
                     }
 
-                    println!("{}", "=== Rune Configuration Wizard (/init) ===".cyan().bold());
+                    println!(
+                        "{}",
+                        "=== Rune Configuration Wizard (/init) ===".cyan().bold()
+                    );
                     println!("Choose default provider:");
                     println!("  1) gemini (Google Gemini API)");
                     println!("  2) openai (OpenAI GPT API)");
@@ -923,7 +1054,11 @@ mysql_url = "{new_mysql_url}"
                     let mut model_input = String::new();
                     std::io::stdin().read_line(&mut model_input).unwrap();
                     let model_val = model_input.trim();
-                    let chosen_model = if model_val.is_empty() { def_model } else { model_val };
+                    let chosen_model = if model_val.is_empty() {
+                        def_model
+                    } else {
+                        model_val
+                    };
 
                     let mut toml_content = format!(
                         r#"# Rune Configuration (`rune.toml`)
@@ -958,22 +1093,53 @@ coder_model = "gpt-5.6-luna"
                     );
 
                     if provider == "ollama" {
-                        toml_content = toml_content.replace(r#"ollama_base_url = "http://localhost:11434""#, &format!(r#"ollama_base_url = "{}""#, key_val))
-                                                   .replace(r#"ollama_model = "llama3""#, &format!(r#"ollama_model = "{}""#, chosen_model));
+                        toml_content = toml_content
+                            .replace(
+                                r#"ollama_base_url = "http://localhost:11434""#,
+                                &format!(r#"ollama_base_url = "{}""#, key_val),
+                            )
+                            .replace(
+                                r#"ollama_model = "llama3""#,
+                                &format!(r#"ollama_model = "{}""#, chosen_model),
+                            );
                     } else if provider == "lmstudio" {
-                        toml_content = toml_content.replace(r#"lm_studio_base_url = "http://localhost:1234/v1""#, &format!(r#"lm_studio_base_url = "{}""#, key_val))
-                                                   .replace(r#"lm_studio_model = "local-model""#, &format!(r#"lm_studio_model = "{}""#, chosen_model));
+                        toml_content = toml_content
+                            .replace(
+                                r#"lm_studio_base_url = "http://localhost:1234/v1""#,
+                                &format!(r#"lm_studio_base_url = "{}""#, key_val),
+                            )
+                            .replace(
+                                r#"lm_studio_model = "local-model""#,
+                                &format!(r#"lm_studio_model = "{}""#, chosen_model),
+                            );
                     } else if provider == "gemini" {
-                        toml_content = toml_content.replace(r#"gemini_model = "gemini-3.5-flash-lite""#, &format!(r#"gemini_model = "{}""#, chosen_model));
+                        toml_content = toml_content.replace(
+                            r#"gemini_model = "gemini-3.5-flash-lite""#,
+                            &format!(r#"gemini_model = "{}""#, chosen_model),
+                        );
                     } else if provider == "openai" {
-                        toml_content = toml_content.replace(r#"openai_model = "gpt-5.6-luna""#, &format!(r#"openai_model = "{}""#, chosen_model));
+                        toml_content = toml_content.replace(
+                            r#"openai_model = "gpt-5.6-luna""#,
+                            &format!(r#"openai_model = "{}""#, chosen_model),
+                        );
                     } else if provider == "anthropic" {
-                        toml_content = toml_content.replace(r#"anthropic_model = "claude-3-5-sonnet""#, &format!(r#"anthropic_model = "{}""#, chosen_model));
+                        toml_content = toml_content.replace(
+                            r#"anthropic_model = "claude-3-5-sonnet""#,
+                            &format!(r#"anthropic_model = "{}""#, chosen_model),
+                        );
                     }
 
                     match std::fs::write(target_path, toml_content) {
                         Ok(_) => {
-                            println!("{}", format!("Successfully generated rune.toml at {}", target_path.display()).green().bold());
+                            println!(
+                                "{}",
+                                format!(
+                                    "Successfully generated rune.toml at {}",
+                                    target_path.display()
+                                )
+                                .green()
+                                .bold()
+                            );
                             println!("{}", "You can now restart Rune or use /provider to load the new configuration.".cyan());
                         }
                         Err(e) => {

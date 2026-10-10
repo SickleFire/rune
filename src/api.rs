@@ -302,7 +302,8 @@ impl LLMProvider for GeminiProvider {
 
                     if let Some(json) = line.strip_prefix("data: ") {
                         if let Ok(resp) = serde_json::from_str::<GeminiResponse>(json) {
-                            if let Some(candidate) = resp.candidates.and_then(|c| c.into_iter().next())
+                            if let Some(candidate) =
+                                resp.candidates.and_then(|c| c.into_iter().next())
                             {
                                 for part in candidate.content.parts {
                                     if let Some(t) = &part.text {
@@ -333,7 +334,10 @@ impl LLMProvider for GeminiProvider {
             if let Some(e) = stream_err {
                 if current_text.is_empty() && current_tool_calls.is_empty() {
                     if attempt >= max_retries {
-                        return Err(format!("Gemini API stream error after {max_retries} attempts: {e}").into());
+                        return Err(format!(
+                            "Gemini API stream error after {max_retries} attempts: {e}"
+                        )
+                        .into());
                     }
                     let backoff = std::time::Duration::from_secs(2u64.pow(attempt - 1));
                     eprintln!(
@@ -674,7 +678,10 @@ impl LLMProvider for OpenAIProvider {
             if let Some(e) = stream_err {
                 if current_text.is_empty() && accum.is_empty() {
                     if attempt >= max_retries {
-                        return Err(format!("OpenAI API stream error after {max_retries} attempts: {e}").into());
+                        return Err(format!(
+                            "OpenAI API stream error after {max_retries} attempts: {e}"
+                        )
+                        .into());
                     }
                     let backoff = std::time::Duration::from_secs(2u64.pow(attempt - 1));
                     eprintln!(
