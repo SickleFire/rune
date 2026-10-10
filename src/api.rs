@@ -552,7 +552,7 @@ impl LLMProvider for OpenAIProvider {
                 function: OpenAIFunctionSpec {
                     name: t.name.clone(),
                     description: t.description.clone(),
-                    parameters: t.parameters.clone(),
+                    parameters: openai_normalize_schema(t.parameters.clone()),
                 },
             })
             .collect();
@@ -602,6 +602,11 @@ impl LLMProvider for OpenAIProvider {
                     tokio::time::sleep(backoff).await;
                     continue;
                 }
+                Ok(resp) if !resp.status().is_success() => {
+                    let status = resp.status();
+                    let body = resp.text().await.unwrap_or_default();
+                    return Err(format!("LLM API request failed ({status}): {body}").into());
+                }
                 Ok(resp) => resp,
                 Err(e) => {
                     if attempt >= max_retries {
@@ -644,30 +649,35 @@ impl LLMProvider for OpenAIProvider {
                         break 'outer;
                     }
 
-                    if let Some(json) = line.strip_prefix("data: ") {
-                        if let Ok(chunk) = serde_json::from_str::<OpenAIChunk>(json) {
-                            for choice in chunk.choices {
-                                let delta = choice.delta;
-                                if let Some(text) = delta.content {
-                                    on_text(text.clone());
-                                    current_text.push_str(&text);
-                                }
-                                if let Some(tc_deltas) = delta.tool_calls {
-                                    for d in tc_deltas {
-                                        let idx = d.index;
-                                        while accum.len() <= idx {
-                                            accum.push(Default::default());
+                    if let Some(json) = line.strip_prefix("data:").map(str::trim) {
+                        let value: serde_json::Value = serde_json::from_str(json)
+                            .map_err(|e| format!("Invalid LLM API stream event: {e}: {json}"))?;
+                        if let Some(error) = value.get("error") {
+                            return Err(format!("LLM API stream error: {error}").into());
+                        }
+                        let chunk: OpenAIChunk = serde_json::from_value(value)
+                            .map_err(|e| format!("Unexpected LLM API stream event: {e}"))?;
+                        for choice in chunk.choices {
+                            let delta = choice.delta;
+                            if let Some(text) = delta.content {
+                                on_text(text.clone());
+                                current_text.push_str(&text);
+                            }
+                            if let Some(tc_deltas) = delta.tool_calls {
+                                for d in tc_deltas {
+                                    let idx = d.index;
+                                    while accum.len() <= idx {
+                                        accum.push(Default::default());
+                                    }
+                                    if let Some(id) = d.id {
+                                        accum[idx].0 = id;
+                                    }
+                                    if let Some(f) = d.function {
+                                        if let Some(name) = f.name {
+                                            accum[idx].1 = name;
                                         }
-                                        if let Some(id) = d.id {
-                                            accum[idx].0 = id;
-                                        }
-                                        if let Some(f) = d.function {
-                                            if let Some(name) = f.name {
-                                                accum[idx].1 = name;
-                                            }
-                                            if let Some(args) = f.arguments {
-                                                accum[idx].2.push_str(&args);
-                                            }
+                                        if let Some(args) = f.arguments {
+                                            accum[idx].2.push_str(&args);
                                         }
                                     }
                                 }
@@ -718,6 +728,41 @@ impl LLMProvider for OpenAIProvider {
         })
     }
 }
+
+pub struct GroqProvider {
+    inner: OpenAIProvider,
+}
+
+impl GroqProvider {
+    pub fn new(api_key: String, model: String) -> Self {
+        Self {
+            inner: OpenAIProvider::new(api_key, model)
+                .with_base_url("https://api.groq.com/openai/v1"),
+        }
+    }
+
+    fn normalize_model(model: &str) -> String {
+        model.strip_prefix("gpt-oss-").map_or_else(
+            || model.to_string(),
+            |name| format!("openai/gpt-oss-{name}"),
+        )
+    }
+}
+
+#[async_trait]
+impl LLMProvider for GroqProvider {
+    async fn complete(
+        &self,
+        history: &[CanonicalMessage],
+        tools: &[FunctionDeclaration],
+        model: &str,
+        on_text: &(dyn Fn(String) + Send + Sync),
+    ) -> Result<ProviderResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let model = Self::normalize_model(model);
+        self.inner.complete(history, tools, &model, on_text).await
+    }
+}
+
 pub struct Agent {
     provider: Arc<dyn LLMProvider>,
     pub model: String,
@@ -1535,6 +1580,40 @@ fn gemini_normalize_schema(value: &mut serde_json::Value) {
     }
 }
 
+fn openai_normalize_schema(mut value: serde_json::Value) -> serde_json::Value {
+    fn normalize(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                if let Some(type_value) = map.get_mut("type") {
+                    match type_value {
+                        serde_json::Value::String(t) => *t = t.to_lowercase(),
+                        serde_json::Value::Array(types) => {
+                            for t in types {
+                                if let serde_json::Value::String(t) = t {
+                                    *t = t.to_lowercase();
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                for child in map.values_mut() {
+                    normalize(child);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    normalize(item);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    normalize(&mut value);
+    value
+}
+
 fn truncate_project_map(mut project_map: String) -> String {
     if project_map.len() > MAX_PROJECT_MAP_CHARS {
         let mut end = MAX_PROJECT_MAP_CHARS;
@@ -1620,5 +1699,43 @@ mod tests {
         });
 
         assert!(agent.get_history_stats().1 > initial_chars);
+    }
+
+    #[test]
+    fn groq_provider_uses_groq_openai_compatible_endpoint() {
+        let provider = GroqProvider::new("test-key".into(), "openai/gpt-oss-120b".into());
+
+        assert_eq!(provider.inner.base_url, "https://api.groq.com/openai/v1");
+        assert_eq!(provider.inner.model, "openai/gpt-oss-120b");
+        assert_eq!(
+            GroqProvider::normalize_model("gpt-oss-120b"),
+            "openai/gpt-oss-120b"
+        );
+        assert_eq!(
+            GroqProvider::normalize_model("meta-llama/llama-4-scout-17b-16e-instruct"),
+            "meta-llama/llama-4-scout-17b-16e-instruct"
+        );
+    }
+
+    #[test]
+    fn openai_schema_normalization_converts_nested_gemini_types() {
+        let schema = serde_json::json!({
+            "type": "OBJECT",
+            "properties": {
+                "key": { "type": "STRING" },
+                "value": { "type": ["STRING", "NULL"] }
+            }
+        });
+
+        assert_eq!(
+            openai_normalize_schema(schema),
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "key": { "type": "string" },
+                    "value": { "type": ["string", "null"] }
+                }
+            })
+        );
     }
 }

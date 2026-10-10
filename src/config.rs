@@ -9,6 +9,8 @@ pub struct RuneConfig {
     pub gemini_model: Option<String>,
     pub openai_api_key: Option<String>,
     pub openai_model: Option<String>,
+    pub groq_api_key: Option<String>,
+    pub groq_model: Option<String>,
     pub anthropic_api_key: Option<String>,
     pub anthropic_model: Option<String>,
     pub ollama_base_url: Option<String>,
@@ -28,6 +30,8 @@ impl Default for RuneConfig {
             gemini_model: Some("gemini-3.5-flash-lite".to_string()),
             openai_api_key: None,
             openai_model: Some("gpt-5.6-luna".to_string()),
+            groq_api_key: None,
+            groq_model: Some("openai/gpt-oss-120b".to_string()),
             anthropic_api_key: None,
             anthropic_model: Some("claude-3-5-sonnet".to_string()),
             ollama_base_url: Some("http://localhost:11434".to_string()),
@@ -133,6 +137,21 @@ impl RuneConfig {
             if let Ok(val) = env::var("OPENAI_MODEL") {
                 if !val.is_empty() {
                     config.openai_model = Some(val);
+                }
+            }
+        }
+
+        if config.groq_api_key.as_deref().unwrap_or("").is_empty() {
+            if let Ok(val) = env::var("GROQ_API_KEY") {
+                if !val.is_empty() {
+                    config.groq_api_key = Some(val);
+                }
+            }
+        }
+        if config.groq_model.as_deref().unwrap_or("").is_empty() {
+            if let Ok(val) = env::var("GROQ_MODEL") {
+                if !val.is_empty() {
+                    config.groq_model = Some(val);
                 }
             }
         }
