@@ -237,10 +237,9 @@ impl LLMProvider for GeminiProvider {
 
         let mut attempt = 0;
         let max_retries = 10;
-        let response = loop {
+        let (text_buf, tool_calls) = loop {
             attempt += 1;
-            let res = self.client.post(&url).json(&request).send().await;
-            match res {
+            let response = match self.client.post(&url).json(&request).send().await {
                 Ok(resp)
                     if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
                         || resp.status().is_server_error() =>
@@ -260,8 +259,9 @@ impl LLMProvider for GeminiProvider {
                         attempt
                     );
                     tokio::time::sleep(backoff).await;
+                    continue;
                 }
-                Ok(resp) => break resp,
+                Ok(resp) => resp,
                 Err(e) => {
                     if attempt >= max_retries {
                         return Err(format!(
@@ -275,45 +275,53 @@ impl LLMProvider for GeminiProvider {
                         backoff, attempt
                     );
                     tokio::time::sleep(backoff).await;
+                    continue;
                 }
-            }
-        };
+            };
 
-        let mut stream = response.bytes_stream();
-        let mut text_buf = String::new();
-        let mut tool_calls: Vec<CanonicalToolCall> = Vec::new();
-        let mut wire_buf = String::new();
-        let mut call_counter = 0usize;
+            let mut stream = response.bytes_stream();
+            let mut current_text = String::new();
+            let mut current_tool_calls: Vec<CanonicalToolCall> = Vec::new();
+            let mut wire_buf = String::new();
+            let mut call_counter = 0usize;
+            let mut stream_err: Option<Box<dyn std::error::Error + Send + Sync>> = None;
 
-        while let Some(chunk) = stream.next().await {
-            let bytes = chunk?;
-            wire_buf.push_str(&String::from_utf8_lossy(&bytes));
+            while let Some(chunk_res) = stream.next().await {
+                let bytes = match chunk_res {
+                    Ok(b) => b,
+                    Err(e) => {
+                        stream_err = Some(Box::new(e));
+                        break;
+                    }
+                };
+                wire_buf.push_str(&String::from_utf8_lossy(&bytes));
 
-            while let Some(end) = wire_buf.find('\n') {
-                let line = wire_buf[..end].trim().to_string();
-                wire_buf.drain(..=end);
+                while let Some(end) = wire_buf.find('\n') {
+                    let line = wire_buf[..end].trim().to_string();
+                    wire_buf.drain(..=end);
 
-                if let Some(json) = line.strip_prefix("data: ") {
-                    if let Ok(resp) = serde_json::from_str::<GeminiResponse>(json) {
-                        if let Some(candidate) = resp.candidates.and_then(|c| c.into_iter().next())
-                        {
-                            for part in candidate.content.parts {
-                                if let Some(t) = &part.text {
-                                    on_text(t.clone());
-                                    text_buf.push_str(t);
-                                }
-                                if let Some(call) = part.function_call {
-                                    if !tool_calls
-                                        .iter()
-                                        .any(|tc| tc.name == call.name && tc.args == call.args)
-                                    {
-                                        tool_calls.push(CanonicalToolCall {
-                                            id: format!("{}_{}", call.name, call_counter),
-                                            name: call.name,
-                                            args: call.args,
-                                            thought_signature: part.thought_signature.clone(),
-                                        });
-                                        call_counter += 1;
+                    if let Some(json) = line.strip_prefix("data: ") {
+                        if let Ok(resp) = serde_json::from_str::<GeminiResponse>(json) {
+                            if let Some(candidate) = resp.candidates.and_then(|c| c.into_iter().next())
+                            {
+                                for part in candidate.content.parts {
+                                    if let Some(t) = &part.text {
+                                        on_text(t.clone());
+                                        current_text.push_str(t);
+                                    }
+                                    if let Some(call) = part.function_call {
+                                        if !current_tool_calls
+                                            .iter()
+                                            .any(|tc| tc.name == call.name && tc.args == call.args)
+                                        {
+                                            current_tool_calls.push(CanonicalToolCall {
+                                                id: format!("{}_{}", call.name, call_counter),
+                                                name: call.name,
+                                                args: call.args,
+                                                thought_signature: part.thought_signature.clone(),
+                                            });
+                                            call_counter += 1;
+                                        }
                                     }
                                 }
                             }
@@ -321,7 +329,26 @@ impl LLMProvider for GeminiProvider {
                     }
                 }
             }
-        }
+
+            if let Some(e) = stream_err {
+                if current_text.is_empty() && current_tool_calls.is_empty() {
+                    if attempt >= max_retries {
+                        return Err(format!("Gemini API stream error after {max_retries} attempts: {e}").into());
+                    }
+                    let backoff = std::time::Duration::from_secs(2u64.pow(attempt - 1));
+                    eprintln!(
+                        "\n[Rune: Stream error ({e}). Restarting request in {:?} (attempt {}/{max_retries})...]",
+                        backoff, attempt
+                    );
+                    tokio::time::sleep(backoff).await;
+                    continue;
+                } else {
+                    return Err(format!("Gemini API stream dropped mid-response: {e}").into());
+                }
+            }
+
+            break (current_text, current_tool_calls);
+        };
 
         Ok(ProviderResponse {
             text: text_buf,
@@ -538,17 +565,16 @@ impl LLMProvider for OpenAIProvider {
 
         let mut attempt = 0;
         let max_retries = 5;
-        let response = loop {
+        let (text_buf, tool_calls) = loop {
             attempt += 1;
-            let res = self
+            let response = match self
                 .client
                 .post(&url)
                 .bearer_auth(&self.api_key)
                 .json(&request)
                 .send()
-                .await;
-
-            match res {
+                .await
+            {
                 Ok(resp)
                     if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
                         || resp.status().is_server_error() =>
@@ -568,8 +594,9 @@ impl LLMProvider for OpenAIProvider {
                         attempt
                     );
                     tokio::time::sleep(backoff).await;
+                    continue;
                 }
-                Ok(resp) => break resp,
+                Ok(resp) => resp,
                 Err(e) => {
                     if attempt >= max_retries {
                         return Err(format!(
@@ -583,50 +610,58 @@ impl LLMProvider for OpenAIProvider {
                         backoff, attempt
                     );
                     tokio::time::sleep(backoff).await;
+                    continue;
                 }
-            }
-        };
+            };
 
-        let mut stream = response.bytes_stream();
-        let mut text_buf = String::new();
-        let mut wire_buf = String::new();
-        let mut accum: Vec<(String, String, String)> = Vec::new();
+            let mut stream = response.bytes_stream();
+            let mut current_text = String::new();
+            let mut wire_buf = String::new();
+            let mut accum: Vec<(String, String, String)> = Vec::new();
+            let mut stream_err: Option<Box<dyn std::error::Error + Send + Sync>> = None;
 
-        'outer: while let Some(chunk) = stream.next().await {
-            let bytes = chunk?;
-            wire_buf.push_str(&String::from_utf8_lossy(&bytes));
+            'outer: while let Some(chunk_res) = stream.next().await {
+                let bytes = match chunk_res {
+                    Ok(b) => b,
+                    Err(e) => {
+                        stream_err = Some(Box::new(e));
+                        break;
+                    }
+                };
+                wire_buf.push_str(&String::from_utf8_lossy(&bytes));
 
-            while let Some(end) = wire_buf.find('\n') {
-                let line = wire_buf[..end].trim().to_string();
-                wire_buf.drain(..=end);
+                while let Some(end) = wire_buf.find('\n') {
+                    let line = wire_buf[..end].trim().to_string();
+                    wire_buf.drain(..=end);
 
-                if line == "data: [DONE]" {
-                    break 'outer;
-                }
+                    if line == "data: [DONE]" {
+                        break 'outer;
+                    }
 
-                if let Some(json) = line.strip_prefix("data: ") {
-                    if let Ok(chunk) = serde_json::from_str::<OpenAIChunk>(json) {
-                        for choice in chunk.choices {
-                            let delta = choice.delta;
-                            if let Some(text) = delta.content {
-                                on_text(text.clone());
-                                text_buf.push_str(&text);
-                            }
-                            if let Some(tc_deltas) = delta.tool_calls {
-                                for d in tc_deltas {
-                                    let idx = d.index;
-                                    while accum.len() <= idx {
-                                        accum.push(Default::default());
-                                    }
-                                    if let Some(id) = d.id {
-                                        accum[idx].0 = id;
-                                    }
-                                    if let Some(f) = d.function {
-                                        if let Some(name) = f.name {
-                                            accum[idx].1 = name;
+                    if let Some(json) = line.strip_prefix("data: ") {
+                        if let Ok(chunk) = serde_json::from_str::<OpenAIChunk>(json) {
+                            for choice in chunk.choices {
+                                let delta = choice.delta;
+                                if let Some(text) = delta.content {
+                                    on_text(text.clone());
+                                    current_text.push_str(&text);
+                                }
+                                if let Some(tc_deltas) = delta.tool_calls {
+                                    for d in tc_deltas {
+                                        let idx = d.index;
+                                        while accum.len() <= idx {
+                                            accum.push(Default::default());
                                         }
-                                        if let Some(args) = f.arguments {
-                                            accum[idx].2.push_str(&args);
+                                        if let Some(id) = d.id {
+                                            accum[idx].0 = id;
+                                        }
+                                        if let Some(f) = d.function {
+                                            if let Some(name) = f.name {
+                                                accum[idx].1 = name;
+                                            }
+                                            if let Some(args) = f.arguments {
+                                                accum[idx].2.push_str(&args);
+                                            }
                                         }
                                     }
                                 }
@@ -635,19 +670,38 @@ impl LLMProvider for OpenAIProvider {
                     }
                 }
             }
-        }
 
-        let tool_calls = accum
-            .into_iter()
-            .filter(|(id, name, _)| !id.is_empty() && !name.is_empty())
-            .map(|(id, name, args_str)| CanonicalToolCall {
-                id,
-                name,
-                args: serde_json::from_str(&args_str)
-                    .unwrap_or(serde_json::Value::Object(Default::default())),
-                thought_signature: None,
-            })
-            .collect();
+            if let Some(e) = stream_err {
+                if current_text.is_empty() && accum.is_empty() {
+                    if attempt >= max_retries {
+                        return Err(format!("OpenAI API stream error after {max_retries} attempts: {e}").into());
+                    }
+                    let backoff = std::time::Duration::from_secs(2u64.pow(attempt - 1));
+                    eprintln!(
+                        "\n[Rune: Stream error ({e}). Restarting request in {:?} (attempt {}/{max_retries})...]",
+                        backoff, attempt
+                    );
+                    tokio::time::sleep(backoff).await;
+                    continue;
+                } else {
+                    return Err(format!("OpenAI API stream dropped mid-response: {e}").into());
+                }
+            }
+
+            let tool_calls = accum
+                .into_iter()
+                .filter(|(id, name, _)| !id.is_empty() && !name.is_empty())
+                .map(|(id, name, args_str)| CanonicalToolCall {
+                    id,
+                    name,
+                    args: serde_json::from_str(&args_str)
+                        .unwrap_or(serde_json::Value::Object(Default::default())),
+                    thought_signature: None,
+                })
+                .collect();
+
+            break (current_text, tool_calls);
+        };
 
         Ok(ProviderResponse {
             text: text_buf,
