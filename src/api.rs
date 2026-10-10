@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tokio::task;
 
+const MAX_PROJECT_MAP_CHARS: usize = 12_000;
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum CanonicalMessage {
     User(String),
@@ -798,7 +800,17 @@ impl Agent {
                 CanonicalMessage::Assistant { text, .. } => text.as_deref().map_or(0, |t| t.len()),
                 CanonicalMessage::ToolResult(r) => r.content.len(),
             })
-            .sum();
+            .sum::<usize>()
+            + self
+                .history
+                .iter()
+                .filter_map(|message| match message {
+                    CanonicalMessage::Assistant { tool_calls, .. } => Some(tool_calls),
+                    _ => None,
+                })
+                .flatten()
+                .map(|call| call.name.len() + call.args.to_string().len())
+                .sum::<usize>();
         (count, chars)
     }
 
@@ -831,7 +843,7 @@ impl Agent {
     }
 
     fn initialize_system_context(&mut self) {
-        let project_map = self.build_project_map(&self.workspace_root.clone(), "");
+        let project_map = truncate_project_map(self.build_project_map(&self.workspace_root, ""));
         let system_prompt = format!(
             "You are Rune, an expert AI coding assistant integrated into a software development workspace.\n\
             \n\
@@ -885,7 +897,22 @@ impl Agent {
             .filter(|e| {
                 let name = e.file_name();
                 let s = name.to_string_lossy();
-                s != "target" && s != ".git" && s != ".DS_Store" && !s.ends_with(".rs.bk")
+                let is_dir = e.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+                !(is_dir
+                    && matches!(
+                        s.as_ref(),
+                        "target"
+                            | ".git"
+                            | "node_modules"
+                            | "vendor"
+                            | "dist"
+                            | "build"
+                            | ".venv"
+                            | "venv"
+                            | "__pycache__"
+                    ))
+                    && s != ".DS_Store"
+                    && !s.ends_with(".rs.bk")
             })
             .collect();
 
@@ -972,13 +999,12 @@ impl Agent {
                         .expect("streamed response lock poisoned")
                         .clone();
                     if !partial_text.is_empty() {
+                        let partial_text =
+                            format!("{partial_text}\n[Response interrupted; incomplete.]");
                         self.history.push(CanonicalMessage::Assistant {
                             text: Some(partial_text),
                             tool_calls: Vec::new(),
                         });
-                        self.history.push(CanonicalMessage::User(format!(
-                            "[Rune: The previous assistant response was interrupted before completion: {e}. The partial response above is incomplete.]"
-                        )));
                     }
                     eprintln!("Provider error: {e}");
                     break;
@@ -1509,6 +1535,21 @@ fn gemini_normalize_schema(value: &mut serde_json::Value) {
     }
 }
 
+fn truncate_project_map(mut project_map: String) -> String {
+    if project_map.len() > MAX_PROJECT_MAP_CHARS {
+        let mut end = MAX_PROJECT_MAP_CHARS;
+        while !project_map.is_char_boundary(end) {
+            end -= 1;
+        }
+        if let Some(line_end) = project_map[..end].rfind('\n') {
+            end = line_end;
+        }
+        project_map.truncate(end);
+        project_map.push_str("\n... [file tree truncated]");
+    }
+    project_map
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1544,12 +1585,40 @@ mod tests {
         assert!(agent.history.iter().any(|message| matches!(
             message,
             CanonicalMessage::Assistant { text: Some(text), .. }
-                if text == "partial patch proposal"
+                if text.contains("partial patch proposal")
+                    && text.ends_with("[Response interrupted; incomplete.]")
         )));
-        assert!(agent.history.iter().any(|message| matches!(
-            message,
-            CanonicalMessage::User(text)
-                if text.contains("interrupted before completion")
-        )));
+    }
+
+    #[test]
+    fn project_map_is_capped_without_splitting_utf8() {
+        let map = format!("{}{}", "a".repeat(MAX_PROJECT_MAP_CHARS - 1), "🌒");
+        let truncated = truncate_project_map(map);
+
+        assert!(truncated.len() <= MAX_PROJECT_MAP_CHARS + 32);
+        assert!(truncated.ends_with("[file tree truncated]"));
+    }
+
+    #[test]
+    fn history_stats_include_tool_call_arguments() {
+        let workspace = tempfile::tempdir().unwrap();
+        let provider: Arc<dyn LLMProvider> = Arc::new(InterruptedProvider);
+        let mut agent = Agent::with_provider(
+            provider,
+            "test-model".into(),
+            workspace.path().to_path_buf(),
+        );
+        let initial_chars = agent.get_history_stats().1;
+        agent.history.push(CanonicalMessage::Assistant {
+            text: None,
+            tool_calls: vec![CanonicalToolCall {
+                id: "call-1".into(),
+                name: "patch_file".into(),
+                args: serde_json::json!({"replace": "substantial patch body"}),
+                thought_signature: None,
+            }],
+        });
+
+        assert!(agent.get_history_stats().1 > initial_chars);
     }
 }
