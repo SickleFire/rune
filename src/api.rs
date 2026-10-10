@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Write as StdWrite;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::task;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -950,17 +950,36 @@ impl Agent {
         self.history.push(CanonicalMessage::User(processed));
 
         loop {
+            let streamed_text = Arc::new(Mutex::new(String::new()));
+            let streamed_text_for_callback = Arc::clone(&streamed_text);
             let result = self
                 .provider
                 .complete(&self.history, &self.tools, &self.model, &|text: String| {
                     print!("{text}");
                     let _ = std::io::stdout().flush();
+                    streamed_text_for_callback
+                        .lock()
+                        .expect("streamed response lock poisoned")
+                        .push_str(&text);
                 })
                 .await;
 
             let ProviderResponse { text, tool_calls } = match result {
                 Ok(r) => r,
                 Err(e) => {
+                    let partial_text = streamed_text
+                        .lock()
+                        .expect("streamed response lock poisoned")
+                        .clone();
+                    if !partial_text.is_empty() {
+                        self.history.push(CanonicalMessage::Assistant {
+                            text: Some(partial_text),
+                            tool_calls: Vec::new(),
+                        });
+                        self.history.push(CanonicalMessage::User(format!(
+                            "[Rune: The previous assistant response was interrupted before completion: {e}. The partial response above is incomplete.]"
+                        )));
+                    }
                     eprintln!("Provider error: {e}");
                     break;
                 }
@@ -1480,11 +1499,57 @@ fn gemini_normalize_schema(value: &mut serde_json::Value) {
                 gemini_normalize_schema(v);
             }
         }
+
         serde_json::Value::Array(arr) => {
             for v in arr.iter_mut() {
                 gemini_normalize_schema(v);
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct InterruptedProvider;
+
+    #[async_trait]
+    impl LLMProvider for InterruptedProvider {
+        async fn complete(
+            &self,
+            _history: &[CanonicalMessage],
+            _tools: &[FunctionDeclaration],
+            _model: &str,
+            on_text: &(dyn Fn(String) + Send + Sync),
+        ) -> Result<ProviderResponse, Box<dyn std::error::Error + Send + Sync>> {
+            on_text("partial patch proposal".into());
+            Err(std::io::Error::other("rate limited").into())
+        }
+    }
+
+    #[tokio::test]
+    async fn run_preserves_text_streamed_before_provider_error() {
+        let workspace = tempfile::tempdir().unwrap();
+        let provider: Arc<dyn LLMProvider> = Arc::new(InterruptedProvider);
+        let mut agent = Agent::with_provider(
+            provider,
+            "test-model".into(),
+            workspace.path().to_path_buf(),
+        );
+
+        agent.run("make a patch", false).await;
+
+        assert!(agent.history.iter().any(|message| matches!(
+            message,
+            CanonicalMessage::Assistant { text: Some(text), .. }
+                if text == "partial patch proposal"
+        )));
+        assert!(agent.history.iter().any(|message| matches!(
+            message,
+            CanonicalMessage::User(text)
+                if text.contains("interrupted before completion")
+        )));
     }
 }
