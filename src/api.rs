@@ -4,10 +4,11 @@ use async_trait::async_trait;
 use colored::*;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::Write as StdWrite;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tokio::task;
 
 const MAX_PROJECT_MAP_CHARS: usize = 12_000;
@@ -123,6 +124,18 @@ pub struct GeminiProvider {
     client: reqwest::Client,
     api_key: String,
     pub model: String,
+    request_limiter: GeminiRequestLimiter,
+}
+
+struct GeminiRequestLimiter {
+    minimum_interval: Duration,
+    max_input_tokens_per_minute: Option<usize>,
+    state: tokio::sync::Mutex<GeminiRequestState>,
+}
+
+struct GeminiRequestState {
+    last_dispatch: Option<Instant>,
+    recent_input_tokens: VecDeque<(Instant, usize)>,
 }
 
 impl GeminiProvider {
@@ -131,9 +144,129 @@ impl GeminiProvider {
             client: reqwest::Client::new(),
             api_key,
             model,
+            request_limiter: GeminiRequestLimiter::new(Duration::from_secs(1), None),
         }
     }
 
+    pub fn with_request_limits(
+        mut self,
+        minimum_interval: Duration,
+        max_input_tokens_per_minute: Option<usize>,
+    ) -> Self {
+        self.request_limiter = GeminiRequestLimiter::new(
+            minimum_interval.max(Duration::from_millis(1)),
+            max_input_tokens_per_minute,
+        );
+        self
+    }
+
+    fn estimate_input_tokens(request: &GeminiRequest) -> Result<usize, serde_json::Error> {
+        let serialized = serde_json::to_vec(request)?;
+        // This intentionally overestimates typical English/code text; it is not Gemini's tokenizer.
+        Ok(serialized.len().div_ceil(3))
+    }
+
+    async fn reserve_request(
+        &self,
+        estimated_tokens: usize,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.request_limiter.reserve(estimated_tokens).await
+    }
+}
+
+impl GeminiRequestLimiter {
+    fn new(minimum_interval: Duration, max_input_tokens_per_minute: Option<usize>) -> Self {
+        Self {
+            minimum_interval,
+            max_input_tokens_per_minute,
+            state: tokio::sync::Mutex::new(GeminiRequestState {
+                last_dispatch: None,
+                recent_input_tokens: VecDeque::new(),
+            }),
+        }
+    }
+
+    async fn reserve(
+        &self,
+        estimated_tokens: usize,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if let Some(limit) = self.max_input_tokens_per_minute {
+            if estimated_tokens > limit {
+                return Err(format!(
+                    "Gemini request is estimated at {estimated_tokens} input tokens, exceeding the configured per-minute limit of {limit}; reduce the prompt/history or raise gemini_max_input_tokens_per_minute"
+                )
+                .into());
+            }
+        }
+
+        loop {
+            let wait = {
+                let mut state = self.state.lock().await;
+                let now = Instant::now();
+                while state
+                    .recent_input_tokens
+                    .front()
+                    .is_some_and(|(time, _)| now.duration_since(*time) >= Duration::from_secs(60))
+                {
+                    state.recent_input_tokens.pop_front();
+                }
+
+                let interval_wait = state
+                    .last_dispatch
+                    .map(|last| {
+                        self.minimum_interval
+                            .saturating_sub(now.duration_since(last))
+                    })
+                    .unwrap_or(Duration::ZERO);
+                let token_wait = self.max_input_tokens_per_minute.and_then(|limit| {
+                    let total = state
+                        .recent_input_tokens
+                        .iter()
+                        .fold(0usize, |total, (_, tokens)| total.saturating_add(*tokens));
+                    if total.saturating_add(estimated_tokens) <= limit {
+                        return None;
+                    }
+
+                    let tokens_to_expire =
+                        total.saturating_add(estimated_tokens).saturating_sub(limit);
+                    let mut expired_tokens = 0usize;
+                    state.recent_input_tokens.iter().find_map(|(time, tokens)| {
+                        expired_tokens = expired_tokens.saturating_add(*tokens);
+                        (expired_tokens >= tokens_to_expire).then(|| {
+                            Duration::from_secs(60).saturating_sub(now.duration_since(*time))
+                        })
+                    })
+                });
+
+                match token_wait {
+                    Some(token_wait) => Some(interval_wait.max(token_wait)),
+                    None if !interval_wait.is_zero() => Some(interval_wait),
+                    None => {
+                        state.last_dispatch = Some(now);
+                        state.recent_input_tokens.push_back((now, estimated_tokens));
+                        let used = state
+                            .recent_input_tokens
+                            .iter()
+                            .fold(0usize, |total, (_, tokens)| total.saturating_add(*tokens));
+                        eprintln!(
+                            "\n[Rune: Gemini input estimate ~{estimated_tokens} tokens; rolling-minute estimate {used}{}]",
+                            self.max_input_tokens_per_minute
+                                .map(|limit| format!(" / {limit}"))
+                                .unwrap_or_default()
+                        );
+                        return Ok(());
+                    }
+                }
+            };
+
+            if let Some(wait) = wait {
+                tokio::time::sleep(wait).await;
+            }
+        }
+    }
+}
+
+impl GeminiProvider {
     fn to_wire(history: &[CanonicalMessage]) -> Vec<GeminiContent> {
         let mut out = Vec::new();
         let mut i = 0;
@@ -236,11 +369,13 @@ impl LLMProvider for GeminiProvider {
                 function_declarations: gemini_tools,
             }]),
         };
+        let estimated_tokens = Self::estimate_input_tokens(&request)?;
 
         let mut attempt = 0;
         let max_retries = 10;
         let (text_buf, tool_calls) = loop {
             attempt += 1;
+            self.reserve_request(estimated_tokens).await?;
             let response = match self.client.post(&url).json(&request).send().await {
                 Ok(resp)
                     if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
@@ -280,6 +415,12 @@ impl LLMProvider for GeminiProvider {
                     continue;
                 }
             };
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let body = response.text().await.unwrap_or_default();
+                return Err(format!("Gemini API request failed ({status}): {body}").into());
+            }
 
             let mut stream = response.bytes_stream();
             let mut current_text = String::new();
@@ -1725,6 +1866,42 @@ mod tests {
         });
 
         assert!(agent.get_history_stats().1 > initial_chars);
+    }
+
+    #[test]
+    fn gemini_input_estimate_includes_serialized_request_content() {
+        let request = GeminiRequest {
+            contents: vec![GeminiContent {
+                role: Some("user".into()),
+                parts: vec![GeminiPart {
+                    text: Some("a sufficiently long input".into()),
+                    function_call: None,
+                    function_response: None,
+                    thought_signature: None,
+                }],
+            }],
+            tools: None,
+        };
+
+        let estimate = GeminiProvider::estimate_input_tokens(&request).unwrap();
+        assert!(estimate >= "a sufficiently long input".len().div_ceil(3));
+    }
+
+    #[tokio::test]
+    async fn gemini_limiter_rejects_a_request_larger_than_its_tpm_budget() {
+        let limiter = GeminiRequestLimiter::new(Duration::ZERO, Some(4));
+
+        assert!(limiter.reserve(5).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn gemini_limiter_enforces_the_minimum_request_interval() {
+        let limiter = GeminiRequestLimiter::new(Duration::from_millis(20), None);
+        limiter.reserve(1).await.unwrap();
+        let second_request_started = Instant::now();
+        limiter.reserve(1).await.unwrap();
+
+        assert!(second_request_started.elapsed() >= Duration::from_millis(18));
     }
 
     #[test]

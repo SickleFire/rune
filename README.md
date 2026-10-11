@@ -56,6 +56,14 @@ iex (iwr -useb https://raw.githubusercontent.com/SickleFire/rune/main/install.ps
 Rune supports configuring API keys, models, and local endpoints via a streamlined `rune.toml` configuration file in your project root or home directory, with full backward compatibility for environment variables (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `RUNE_*`). Groq and OpenRouter use their OpenAI-compatible chat-completions APIs.
 To use OpenRouter, set `provider = "openrouter"` and provide `openrouter_api_key` and `openrouter_model` in `rune.toml`, or set `OPENROUTER_API_KEY` and optionally `OPENROUTER_MODEL` in the environment.
 
+Gemini requests are paced to a minimum interval of 1 second by default. Set
+`gemini_min_request_interval_ms` in `rune.toml` (or `RUNE__GEMINI_MIN_REQUEST_INTERVAL_MS`)
+to adjust it. Rune estimates input tokens from the serialized request and reports a rolling
+60-second estimate; to enforce a TPM budget, set `gemini_max_input_tokens_per_minute` (or
+`RUNE__GEMINI_MAX_INPUT_TOKENS_PER_MINUTE`) to a value below your model/account quota. This
+estimate is not Google's tokenizer, and TPM quotas vary by model and account tier. The limiter
+is shared by requests using the same Gemini provider instance, including retries and tool loops.
+
 1. Copy the sample configuration file (or run the setup script):
    ```bash
    cp rune.toml.example rune.toml

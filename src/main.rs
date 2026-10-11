@@ -163,10 +163,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let default_provider: Arc<dyn LLMProvider> = if provider_name.eq_ignore_ascii_case("gemini")
         || (!gemini_api_key.is_empty() && provider_name == "auto")
     {
-        Arc::new(rune::api::GeminiProvider::new(
-            gemini_api_key.clone(),
-            gemini_model.clone(),
-        ))
+        Arc::new(
+            rune::api::GeminiProvider::new(gemini_api_key.clone(), gemini_model.clone())
+                .with_request_limits(
+                    std::time::Duration::from_millis(config.gemini_min_request_interval_ms),
+                    config.gemini_max_input_tokens_per_minute,
+                ),
+        )
     } else if provider_name.eq_ignore_ascii_case("openai")
         || (!openai_api_key.is_empty() && provider_name == "auto")
     {
@@ -224,10 +227,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .with_reasoning_effort("none"),
         )
     } else if !gemini_api_key.is_empty() {
-        Arc::new(rune::api::GeminiProvider::new(
-            gemini_api_key.clone(),
-            gemini_model.clone(),
-        ))
+        Arc::new(
+            rune::api::GeminiProvider::new(gemini_api_key.clone(), gemini_model.clone())
+                .with_request_limits(
+                    std::time::Duration::from_millis(config.gemini_min_request_interval_ms),
+                    config.gemini_max_input_tokens_per_minute,
+                ),
+        )
     } else if !openai_api_key.is_empty() {
         Arc::new(
             rune::api::OpenAIProvider::new(openai_api_key.clone(), openai_model.clone())
@@ -664,7 +670,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 let model =
                                     model_arg.clone().unwrap_or_else(|| gemini_model.clone());
                                 (
-                                    Arc::new(rune::api::GeminiProvider::new(key, model.clone())),
+                                    Arc::new(
+                                        rune::api::GeminiProvider::new(key, model.clone())
+                                            .with_request_limits(
+                                                std::time::Duration::from_millis(
+                                                    config.gemini_min_request_interval_ms,
+                                                ),
+                                                config.gemini_max_input_tokens_per_minute,
+                                            ),
+                                    ),
                                     model,
                                 )
                             }
