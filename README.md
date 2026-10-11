@@ -51,6 +51,13 @@ curl -sSL https://raw.githubusercontent.com/SickleFire/rune/main/install.sh | ba
 iex (iwr -useb https://raw.githubusercontent.com/SickleFire/rune/main/install.ps1)
 ```
 
+#### Install from crates.io
+If you have Rust and Cargo installed, you can install the `rune-code` package from crates.io. The installed command is still `rune`:
+
+```bash
+cargo install rune-code
+```
+
 ### Configuration & Environment Management
 
 Rune supports configuring API keys, models, and local endpoints via a streamlined `rune.toml` configuration file in your project root or home directory, with full backward compatibility for environment variables (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `RUNE_*`). Groq and OpenRouter use their OpenAI-compatible chat-completions APIs.

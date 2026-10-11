@@ -40,7 +40,8 @@ if ($arch -ne "x86_64") {
 }
 
 $Target = "x86_64-pc-windows-msvc"
-$Archive = "rune-$Target.zip"
+$Archive = "rune-code-$Target.zip"
+$LegacyArchive = "rune-$Target.zip"
 $DownloadUrl = "https://github.com/$Repo/releases/latest/download/$Archive"
 
 # Default install directory
@@ -68,9 +69,16 @@ try {
         $headers = @{ "User-Agent" = "Rune-Installer" }
         Invoke-WebRequest -Uri $DownloadUrl -OutFile $zipPath -UseBasicParsing -Headers $headers
     } catch {
-        Write-Color "[ERROR] Failed to download from $DownloadUrl" ([ConsoleColor]::Red)
-        Write-Color $_.Exception.Message ([ConsoleColor]::Red)
-        exit 1
+        Write-Color "[INFO] New release asset unavailable; trying legacy asset $LegacyArchive..." ([ConsoleColor]::Yellow)
+        $Archive = $LegacyArchive
+        $DownloadUrl = "https://github.com/$Repo/releases/latest/download/$Archive"
+        try {
+            Invoke-WebRequest -Uri $DownloadUrl -OutFile $zipPath -UseBasicParsing -Headers $headers
+        } catch {
+            Write-Color "[ERROR] Failed to download from $DownloadUrl" ([ConsoleColor]::Red)
+            Write-Color $_.Exception.Message ([ConsoleColor]::Red)
+            exit 1
+        }
     }
 
     Write-Color "Extracting archive..." ([ConsoleColor]::Blue)

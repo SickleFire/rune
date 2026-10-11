@@ -16,6 +16,13 @@ Or if you already downloaded or cloned the repository, run the interactive setup
 .\setup-gemini.ps1
 ```
 
+### Install from crates.io
+With Rust and Cargo installed, install the `rune-code` package using:
+```bash
+cargo install rune-code
+```
+This installs the `rune` command.
+
 ### Custom Installation Directory
 By default, the script installs `rune` into `$HOME/.local/bin`. You can customize the install directory by setting the `INSTALL_DIR` environment variable:
 ```bash

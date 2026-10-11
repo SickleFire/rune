@@ -36,5 +36,8 @@ jobs:
       - name: Run tests
         run: cargo test --all-targets --all-features
 
+      - name: Install package
+        run: cargo install --path . --locked --root target/cargo-install
+
       - name: Build release binary
         run: cargo build --release

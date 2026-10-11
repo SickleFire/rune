@@ -1,6 +1,6 @@
 use colored::*;
-use rune::agent::{AgentConfig, AgentRole, MultiAgentConfig, MultiAgentOrchestrator};
-use rune::api::LLMProvider;
+use rune_code::agent::{AgentConfig, AgentRole, MultiAgentConfig, MultiAgentOrchestrator};
+use rune_code::api::LLMProvider;
 use rustyline::Context;
 use rustyline::Editor;
 use rustyline::completion::{Completer, Pair};
@@ -12,21 +12,21 @@ use std::env;
 use std::error::Error;
 use std::sync::Arc;
 
-struct RuneHelper {
+struct RuneCodeHelper {
     hinter: HistoryHinter,
 }
 
-impl Hinter for RuneHelper {
+impl Hinter for RuneCodeHelper {
     type Hint = String;
     fn hint(&self, line: &str, pos: usize, ctx: &Context<'_>) -> Option<String> {
         self.hinter.hint(line, pos, ctx)
     }
 }
 
-impl Highlighter for RuneHelper {}
-impl Validator for RuneHelper {}
+impl Highlighter for RuneCodeHelper {}
+impl Validator for RuneCodeHelper {}
 
-impl Completer for RuneHelper {
+impl Completer for RuneCodeHelper {
     type Candidate = Pair;
 
     fn complete(
@@ -85,7 +85,7 @@ impl Completer for RuneHelper {
     }
 }
 
-impl rustyline::Helper for RuneHelper {}
+impl rustyline::Helper for RuneCodeHelper {}
 
 fn collect_file_candidates(dir: &std::path::Path, prefix: &str, pairs: &mut Vec<Pair>) {
     let entries = match std::fs::read_dir(dir) {
@@ -126,7 +126,7 @@ fn collect_file_candidates(dir: &std::path::Path, prefix: &str, pairs: &mut Vec<
 async fn main() -> Result<(), Box<dyn Error>> {
     let workspace_root = env::current_dir().expect("Failed to get current directory");
 
-    let config = rune::config::RuneConfig::load();
+    let config = rune_code::config::RuneConfig::load();
 
     let gemini_api_key = config.gemini_api_key.clone().unwrap_or_default();
     let gemini_model = config
@@ -164,7 +164,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         || (!gemini_api_key.is_empty() && provider_name == "auto")
     {
         Arc::new(
-            rune::api::GeminiProvider::new(gemini_api_key.clone(), gemini_model.clone())
+            rune_code::api::GeminiProvider::new(gemini_api_key.clone(), gemini_model.clone())
                 .with_request_limits(
                     std::time::Duration::from_millis(config.gemini_min_request_interval_ms),
                     config.gemini_max_input_tokens_per_minute,
@@ -174,20 +174,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
         || (!openai_api_key.is_empty() && provider_name == "auto")
     {
         Arc::new(
-            rune::api::OpenAIProvider::new(openai_api_key.clone(), openai_model.clone())
+            rune_code::api::OpenAIProvider::new(openai_api_key.clone(), openai_model.clone())
                 .with_reasoning_effort("none"),
         )
     } else if provider_name.eq_ignore_ascii_case("groq")
         || (!groq_api_key.is_empty() && provider_name == "auto")
     {
-        Arc::new(rune::api::GroqProvider::new(
+        Arc::new(rune_code::api::GroqProvider::new(
             groq_api_key.clone(),
             groq_model.clone(),
         ))
     } else if provider_name.eq_ignore_ascii_case("openrouter")
         || (!openrouter_api_key.is_empty() && provider_name == "auto")
     {
-        Arc::new(rune::api::OpenRouterProvider::new(
+        Arc::new(rune_code::api::OpenRouterProvider::new(
             openrouter_api_key.clone(),
             openrouter_model.clone(),
         ))
@@ -195,7 +195,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         || (!anthropic_api_key.is_empty() && provider_name == "auto")
     {
         Arc::new(
-            rune::api::OpenAIProvider::new(anthropic_api_key.clone(), anthropic_model.clone()) // Or Anthropic provider if implemented, falling back nicely
+            rune_code::api::OpenAIProvider::new(anthropic_api_key.clone(), anthropic_model.clone()) // Or Anthropic provider if implemented, falling back nicely
                 .with_reasoning_effort("none"),
         )
     } else if provider_name.eq_ignore_ascii_case("ollama") {
@@ -209,7 +209,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             base_url, model
         );
         Arc::new(
-            rune::api::OpenAIProvider::new("ollama-local".into(), model.into())
+            rune_code::api::OpenAIProvider::new("ollama-local".into(), model.into())
                 .with_reasoning_effort("none"),
         )
     } else if provider_name.eq_ignore_ascii_case("lmstudio") {
@@ -223,12 +223,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
             base_url, model
         );
         Arc::new(
-            rune::api::OpenAIProvider::new("lm-studio-local".into(), model.into())
+            rune_code::api::OpenAIProvider::new("lm-studio-local".into(), model.into())
                 .with_reasoning_effort("none"),
         )
     } else if !gemini_api_key.is_empty() {
         Arc::new(
-            rune::api::GeminiProvider::new(gemini_api_key.clone(), gemini_model.clone())
+            rune_code::api::GeminiProvider::new(gemini_api_key.clone(), gemini_model.clone())
                 .with_request_limits(
                     std::time::Duration::from_millis(config.gemini_min_request_interval_ms),
                     config.gemini_max_input_tokens_per_minute,
@@ -236,16 +236,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         )
     } else if !openai_api_key.is_empty() {
         Arc::new(
-            rune::api::OpenAIProvider::new(openai_api_key.clone(), openai_model.clone())
+            rune_code::api::OpenAIProvider::new(openai_api_key.clone(), openai_model.clone())
                 .with_reasoning_effort("none"),
         )
     } else if !groq_api_key.is_empty() {
-        Arc::new(rune::api::GroqProvider::new(
+        Arc::new(rune_code::api::GroqProvider::new(
             groq_api_key.clone(),
             groq_model.clone(),
         ))
     } else if !openrouter_api_key.is_empty() {
-        Arc::new(rune::api::OpenRouterProvider::new(
+        Arc::new(rune_code::api::OpenRouterProvider::new(
             openrouter_api_key.clone(),
             openrouter_model.clone(),
         ))
@@ -338,12 +338,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Always enable core persistent memory and session memory tools
     orchestrator = orchestrator
         .with_tool_on_all(std::sync::Arc::new(
-            rune::memory_tools::RememberPreferenceTool,
+            rune_code::memory_tools::RememberPreferenceTool,
         ))
-        .with_tool_on_all(std::sync::Arc::new(rune::memory_tools::RecallMemoryTool))
-        .with_tool_on_all(std::sync::Arc::new(rune::memory_tools::RecordFixTool))
+        .with_tool_on_all(std::sync::Arc::new(rune_code::memory_tools::RecallMemoryTool))
+        .with_tool_on_all(std::sync::Arc::new(rune_code::memory_tools::RecordFixTool))
         .with_tool_on_all(std::sync::Arc::new(
-            rune::memory_tools::RecordFileRelationTool,
+            rune_code::memory_tools::RecordFileRelationTool,
         ));
 
     if enable_unity_lite {
@@ -353,19 +353,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
         );
         orchestrator = orchestrator
             .with_tool_on_all(std::sync::Arc::new(
-                rune::unity_tools::UnityInspectSceneTool::new(),
+                rune_code::unity_tools::UnityInspectSceneTool::new(),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::unity_tools::UnityInspectComponentsTool::new(),
+                rune_code::unity_tools::UnityInspectComponentsTool::new(),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::unity_tools::UnityFindAssetsTool::new(),
+                rune_code::unity_tools::UnityFindAssetsTool::new(),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::unity_tools::UnityValidateReferencesTool::new(),
+                rune_code::unity_tools::UnityValidateReferencesTool::new(),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::unity_tools::UnityReadConsoleLogsTool::new(),
+                rune_code::unity_tools::UnityReadConsoleLogsTool::new(),
             ));
     }
 
@@ -373,37 +373,37 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("{}", "Unity editor tools enabled.".cyan());
         orchestrator = orchestrator
             .with_tool_on_all(std::sync::Arc::new(
-                rune::unity_tools::UnityInspectSceneTool::new(),
+                rune_code::unity_tools::UnityInspectSceneTool::new(),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::unity_tools::UnitySetPropertyTool::new(),
+                rune_code::unity_tools::UnitySetPropertyTool::new(),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::unity_tools::UnityInspectComponentsTool::new(),
+                rune_code::unity_tools::UnityInspectComponentsTool::new(),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::unity_tools::UnityAssignReferenceTool::new(),
+                rune_code::unity_tools::UnityAssignReferenceTool::new(),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::unity_tools::UnityValidateReferencesTool::new(),
+                rune_code::unity_tools::UnityValidateReferencesTool::new(),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::unity_tools::UnityAddComponentTool::new(),
+                rune_code::unity_tools::UnityAddComponentTool::new(),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::unity_tools::UnityFindAssetsTool::new(),
+                rune_code::unity_tools::UnityFindAssetsTool::new(),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::unity_tools::UnityInstantiatePrefabTool::new(),
+                rune_code::unity_tools::UnityInstantiatePrefabTool::new(),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::unity_tools::UnityCreateScriptableObjectTool::new(),
+                rune_code::unity_tools::UnityCreateScriptableObjectTool::new(),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::unity_tools::UnityRefreshAssetDatabaseTool::new(),
+                rune_code::unity_tools::UnityRefreshAssetDatabaseTool::new(),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::unity_tools::UnityReadConsoleLogsTool::new(),
+                rune_code::unity_tools::UnityReadConsoleLogsTool::new(),
             ))
     }
 
@@ -411,41 +411,41 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("{}", "Godot editor tools enabled.".cyan());
         orchestrator = orchestrator
             .with_tool_on_all(std::sync::Arc::new(
-                rune::godot_tools::GodotInspectSceneTool::new(),
+                rune_code::godot_tools::GodotInspectSceneTool::new(),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::godot_tools::GodotInspectNodePropertiesTool::new(),
+                rune_code::godot_tools::GodotInspectNodePropertiesTool::new(),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::godot_tools::GodotCreateNodeTool::new(),
+                rune_code::godot_tools::GodotCreateNodeTool::new(),
             ))
     }
 
     if enable_web {
         println!("{}", "Web utility tools enabled.".cyan());
         orchestrator = orchestrator
-            .with_tool_on_all(std::sync::Arc::new(rune::web_tools::HttpRequestTool::new()))
-            .with_tool_on_all(std::sync::Arc::new(rune::web_tools::FetchWebPageTool::new()))
-            .with_tool_on_all(std::sync::Arc::new(rune::web_tools::CheckTcpPortTool::new()))
+            .with_tool_on_all(std::sync::Arc::new(rune_code::web_tools::HttpRequestTool::new()))
+            .with_tool_on_all(std::sync::Arc::new(rune_code::web_tools::FetchWebPageTool::new()))
+            .with_tool_on_all(std::sync::Arc::new(rune_code::web_tools::CheckTcpPortTool::new()))
     }
 
     if enable_github {
         println!("{}", "GitHub integration tools enabled.".cyan());
         orchestrator = orchestrator
             .with_tool_on_all(std::sync::Arc::new(
-                rune::github_tools::GitHubIssueTool::new(),
+                rune_code::github_tools::GitHubIssueTool::new(),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::github_tools::GitHubPullRequestDiffTool::new(),
+                rune_code::github_tools::GitHubPullRequestDiffTool::new(),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::github_tools::GitHubCreateIssueTool::new(),
+                rune_code::github_tools::GitHubCreateIssueTool::new(),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::github_tools::GitHubCreateCommentTool::new(),
+                rune_code::github_tools::GitHubCreateCommentTool::new(),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::github_tools::GitHubCreatePullRequestTool::new(),
+                rune_code::github_tools::GitHubCreatePullRequestTool::new(),
             ))
     }
 
@@ -454,13 +454,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let mysql_url = env::var("MYSQL_URL").ok();
         orchestrator = orchestrator
             .with_tool_on_all(std::sync::Arc::new(
-                rune::mysql_tools::MysqlListTablesTool::new(mysql_url.clone()),
+                rune_code::mysql_tools::MysqlListTablesTool::new(mysql_url.clone()),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::mysql_tools::MysqlDescribeTableTool::new(mysql_url.clone()),
+                rune_code::mysql_tools::MysqlDescribeTableTool::new(mysql_url.clone()),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::mysql_tools::MysqlExecuteQueryTool::new(mysql_url),
+                rune_code::mysql_tools::MysqlExecuteQueryTool::new(mysql_url),
             ))
     }
 
@@ -468,29 +468,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("{}", "Docker container tools enabled.".cyan());
         orchestrator = orchestrator
             .with_tool_on_all(std::sync::Arc::new(
-                rune::docker_tools::DockerListContainersTool::new(),
+                rune_code::docker_tools::DockerListContainersTool::new(),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::docker_tools::DockerContainerLogsTool::new(),
+                rune_code::docker_tools::DockerContainerLogsTool::new(),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::docker_tools::DockerStartContainerTool::new(),
+                rune_code::docker_tools::DockerStartContainerTool::new(),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::docker_tools::DockerStopContainerTool::new(),
+                rune_code::docker_tools::DockerStopContainerTool::new(),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::docker_tools::DockerListImagesTool::new(),
+                rune_code::docker_tools::DockerListImagesTool::new(),
             ))
             .with_tool_on_all(std::sync::Arc::new(
-                rune::docker_tools::DockerInspectContainerTool::new(),
+                rune_code::docker_tools::DockerInspectContainerTool::new(),
             ))
     }
 
     let mut auto_approve = false;
     let mut plan_mode = false;
     let mut rl = Editor::new()?;
-    rl.set_helper(Some(RuneHelper {
+    rl.set_helper(Some(RuneCodeHelper {
         hinter: HistoryHinter::new(),
     }));
     let history_file = env::temp_dir().join(".rune_history");
@@ -545,7 +545,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 if prompt.eq_ignore_ascii_case("/undo") {
                     let undo_result: Result<String, std::io::Error> = (async {
                         let workspace_root = std::env::current_dir()?;
-                        let executor = rune::tools::ToolExecutor::new(workspace_root);
+                        let executor = rune_code::tools::ToolExecutor::new(workspace_root);
                         executor.undo_git_checkpoint().await
                     })
                     .await;
@@ -571,7 +571,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
 
                 if prompt.eq_ignore_ascii_case("/files") || prompt.eq_ignore_ascii_case("/tree") {
-                    let agent = rune::api::Agent::new_gemini(
+                    let agent = rune_code::api::Agent::new_gemini(
                         env::var("GEMINI_API_KEY").unwrap_or_default(),
                         workspace_root.clone(),
                         gemini_model.clone(),
@@ -671,7 +671,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     model_arg.clone().unwrap_or_else(|| gemini_model.clone());
                                 (
                                     Arc::new(
-                                        rune::api::GeminiProvider::new(key, model.clone())
+                                        rune_code::api::GeminiProvider::new(key, model.clone())
                                             .with_request_limits(
                                                 std::time::Duration::from_millis(
                                                     config.gemini_min_request_interval_ms,
@@ -690,7 +690,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     model_arg.clone().unwrap_or_else(|| openai_model.clone());
                                 (
                                     Arc::new(
-                                        rune::api::OpenAIProvider::new(key, model.clone())
+                                        rune_code::api::OpenAIProvider::new(key, model.clone())
                                             .with_reasoning_effort("none"),
                                     ),
                                     model,
@@ -702,7 +702,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 });
                                 let model = model_arg.clone().unwrap_or_else(|| groq_model.clone());
                                 (
-                                    Arc::new(rune::api::GroqProvider::new(key, model.clone())),
+                                    Arc::new(rune_code::api::GroqProvider::new(key, model.clone())),
                                     model,
                                 )
                             }
@@ -714,7 +714,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     .clone()
                                     .unwrap_or_else(|| openrouter_model.clone());
                                 (
-                                    Arc::new(rune::api::OpenRouterProvider::new(
+                                    Arc::new(rune_code::api::OpenRouterProvider::new(
                                         key,
                                         model.clone(),
                                     )),
@@ -729,7 +729,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     model_arg.clone().unwrap_or_else(|| anthropic_model.clone());
                                 (
                                     Arc::new(
-                                        rune::api::OpenAIProvider::new(key, model.clone())
+                                        rune_code::api::OpenAIProvider::new(key, model.clone())
                                             .with_reasoning_effort("none"),
                                     ),
                                     model,
@@ -748,7 +748,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 });
                                 (
                                     Arc::new(
-                                        rune::api::OpenAIProvider::new(
+                                        rune_code::api::OpenAIProvider::new(
                                             "ollama-local".into(),
                                             model.clone(),
                                         )
@@ -770,7 +770,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 });
                                 (
                                     Arc::new(
-                                        rune::api::OpenAIProvider::new(
+                                        rune_code::api::OpenAIProvider::new(
                                             "lm-studio-local".into(),
                                             model.clone(),
                                         )

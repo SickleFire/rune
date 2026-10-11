@@ -19,7 +19,8 @@ case "$OS" in
     Linux)
         if [ "$ARCH" = "x86_64" ]; then
             TARGET="x86_64-unknown-linux-gnu"
-            ARCHIVE="rune-$TARGET.tar.gz"
+            ARCHIVE="rune-code-$TARGET.tar.gz"
+            LEGACY_ARCHIVE="rune-$TARGET.tar.gz"
         else
             echo -e "${RED}Unsupported Linux architecture: $ARCH${NC}"; exit 1
         fi
@@ -27,14 +28,16 @@ case "$OS" in
     Darwin)
         if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
             TARGET="aarch64-apple-darwin"
-            ARCHIVE="rune-$TARGET.tar.gz"
+            ARCHIVE="rune-code-$TARGET.tar.gz"
+            LEGACY_ARCHIVE="rune-$TARGET.tar.gz"
         else
             echo -e "${RED}Unsupported macOS architecture: $ARCH. Only Apple Silicon is currently built.${NC}"; exit 1
         fi
         ;;
     CYGWIN*|MINGW*|MSYS*)
         TARGET="x86_64-pc-windows-msvc"
-        ARCHIVE="rune-$TARGET.zip"
+        ARCHIVE="rune-code-$TARGET.zip"
+        LEGACY_ARCHIVE="rune-$TARGET.zip"
         ;;
     *)
         echo -e "${RED}Unsupported operating system: $OS${NC}"; exit 1
@@ -52,12 +55,25 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 cd "$TMP_DIR"
 
-if command -v curl >/dev/null 2>&1; then
-    curl -fSL -O "$DOWNLOAD_URL"  # -f: fail on HTTP errors, -S: show errors even with -s
-elif command -v wget >/dev/null 2>&1; then
-    wget -q "$DOWNLOAD_URL"
-else
-    echo -e "${RED}Error: Neither curl nor wget is available.${NC}"; exit 1
+download_archive() {
+    if command -v curl >/dev/null 2>&1; then
+        curl -fSL -o "$ARCHIVE" "$DOWNLOAD_URL"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q -O "$ARCHIVE" "$DOWNLOAD_URL"
+    else
+        echo -e "${RED}Error: Neither curl nor wget is available.${NC}"
+        return 1
+    fi
+}
+
+if ! download_archive; then
+    echo -e "${BLUE}Trying legacy release asset $LEGACY_ARCHIVE...${NC}"
+    ARCHIVE="$LEGACY_ARCHIVE"
+    DOWNLOAD_URL="https://github.com/$REPO/releases/latest/download/$ARCHIVE"
+    if ! download_archive; then
+        echo -e "${RED}Failed to download $ARCHIVE. Do any releases exist for $REPO?${NC}"
+        exit 1
+    fi
 fi
 
 if [ ! -f "$ARCHIVE" ]; then
