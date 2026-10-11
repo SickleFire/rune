@@ -89,12 +89,16 @@ impl MemoryStore {
         solution: impl Into<String>,
     ) -> Result<(), String> {
         let mut latest = Self::load();
-        latest.past_fixes.push(PastFix {
-            problem: problem.into(),
-            solution: solution.into(),
-        });
-        latest.save()?;
-        *self = latest;
+        let prob = problem.into();
+        let sol = solution.into();
+        if !latest.past_fixes.iter().any(|f| f.problem == prob && f.solution == sol) {
+            latest.past_fixes.push(PastFix {
+                problem: prob,
+                solution: sol,
+            });
+            latest.save()?;
+            *self = latest;
+        }
         Ok(())
     }
 
@@ -117,15 +121,30 @@ impl MemoryStore {
         notes: impl Into<String>,
     ) -> Result<(), String> {
         let mut latest = Self::load();
-        latest.file_relations.push(FileRelation {
-            file_path: file_path.into(),
-            related_symbol: related_symbol.into(),
-            relation_type: relation_type.into(),
-            target_file: target_file.into(),
-            notes: notes.into(),
-        });
-        latest.save()?;
-        *self = latest;
+        let fp = file_path.into();
+        let rs = related_symbol.into();
+        let rt = relation_type.into();
+        let tf = target_file.into();
+        let n = notes.into();
+
+        // Check if identical file relation already exists
+        if !latest.file_relations.iter().any(|r| {
+            r.file_path == fp
+                && r.related_symbol == rs
+                && r.relation_type == rt
+                && r.target_file == tf
+                && r.notes == n
+        }) {
+            latest.file_relations.push(FileRelation {
+                file_path: fp,
+                related_symbol: rs,
+                relation_type: rt,
+                target_file: tf,
+                notes: n,
+            });
+            latest.save()?;
+            *self = latest;
+        }
         Ok(())
     }
 

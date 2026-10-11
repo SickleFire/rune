@@ -1,7 +1,14 @@
 [package]
-name = "rune"
-version = "0.1.0"
+name = "rune-code"
+version = "0.3.0"
 edition = "2024"
+description = "An expert AI coding assistant integrated into software development workspaces, CLI, and game engines (Unity/Godot)"
+license = "MIT"
+repository = "https://github.com/SickleFire/rune"
+documentation = "https://github.com/SickleFire/rune#readme"
+readme = "README.md"
+keywords = ["ai", "assistant", "cli", "repl", "game-development"]
+categories = ["development-tools", "command-line-utilities"]
 
 [dependencies]
 async-trait = "0.1.92"
