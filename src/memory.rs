@@ -91,7 +91,11 @@ impl MemoryStore {
         let mut latest = Self::load();
         let prob = problem.into();
         let sol = solution.into();
-        if !latest.past_fixes.iter().any(|f| f.problem == prob && f.solution == sol) {
+        if !latest
+            .past_fixes
+            .iter()
+            .any(|f| f.problem == prob && f.solution == sol)
+        {
             latest.past_fixes.push(PastFix {
                 problem: prob,
                 solution: sol,

@@ -340,7 +340,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with_tool_on_all(std::sync::Arc::new(
             rune_code::memory_tools::RememberPreferenceTool,
         ))
-        .with_tool_on_all(std::sync::Arc::new(rune_code::memory_tools::RecallMemoryTool))
+        .with_tool_on_all(std::sync::Arc::new(
+            rune_code::memory_tools::RecallMemoryTool,
+        ))
         .with_tool_on_all(std::sync::Arc::new(rune_code::memory_tools::RecordFixTool))
         .with_tool_on_all(std::sync::Arc::new(
             rune_code::memory_tools::RecordFileRelationTool,
@@ -424,9 +426,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if enable_web {
         println!("{}", "Web utility tools enabled.".cyan());
         orchestrator = orchestrator
-            .with_tool_on_all(std::sync::Arc::new(rune_code::web_tools::HttpRequestTool::new()))
-            .with_tool_on_all(std::sync::Arc::new(rune_code::web_tools::FetchWebPageTool::new()))
-            .with_tool_on_all(std::sync::Arc::new(rune_code::web_tools::CheckTcpPortTool::new()))
+            .with_tool_on_all(std::sync::Arc::new(
+                rune_code::web_tools::HttpRequestTool::new(),
+            ))
+            .with_tool_on_all(std::sync::Arc::new(
+                rune_code::web_tools::FetchWebPageTool::new(),
+            ))
+            .with_tool_on_all(std::sync::Arc::new(
+                rune_code::web_tools::CheckTcpPortTool::new(),
+            ))
     }
 
     if enable_github {
