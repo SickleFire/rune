@@ -1067,7 +1067,8 @@ impl Agent {
             - When the user mentions specific files using `@filename` (e.g. `@src/api.rs`), those files are automatically loaded and injected into your prompt context.\n\
             - Use `search_code` (powered by the `cix` indexed search engine) to instantly search for functions, symbols, or patterns across the repository when you need to locate code.\n\
             - Use `search_symbol` (powered by the `cix` indexed search engine) to get symbols of a file.\n\
-            - **Token-Efficient Reading Workflow**: When inspecting large files, use `search_symbol` first to locate target line numbers, then call `read_file` with `start_line` and `end_line` to fetch only relevant lines.\n\
+            - **Token-Efficient Reading Workflow**: When inspecting large files, use `search_symbol` first to locate target line numbers, then call `read_file` with `start_line` and `end_line` to fetch only relevant lines.
+            - **Rune Notes Workflow**: Prioritize checking and reading relevant rune notes in `.rune/notes/` via `list_rune_notes` and `read_rune_note` before reading raw source code files to obtain architectural context and historical decisions efficiently.\n\
             - Use `read_file`, `list_files`, `write_file`, `patch_file`, `execute_commands`, and `execute_batch` as needed to inspect and modify code.\n\
             - Prefer `patch_file` over `write_file` for surgical code edits using search and replace blocks.\n\
             - Be concise, precise, and proactive.\n\
