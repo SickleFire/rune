@@ -21,7 +21,8 @@ impl AgentTool for ListRuneNotesTool {
     fn declaration(&self) -> FunctionDeclaration {
         FunctionDeclaration {
             name: "list_rune_notes".to_string(),
-            description: "List all available rune-notes (knowledge nodes) in .rune/notes/".to_string(),
+            description: "List all available rune-notes (knowledge nodes) in .rune/notes/"
+                .to_string(),
             parameters: json!({
                 "type": "OBJECT",
                 "properties": {},
@@ -48,7 +49,10 @@ impl AgentTool for ListRuneNotesTool {
                     let p = entry.path();
                     if p.is_dir() {
                         stack.push(p);
-                    } else if p.extension().map_or(false, |ext| ext == "md" || ext == "markdown") {
+                    } else if p
+                        .extension()
+                        .map_or(false, |ext| ext == "md" || ext == "markdown")
+                    {
                         if let Ok(rel) = p.strip_prefix(&dir) {
                             notes.push(rel.to_string_lossy().to_string());
                         } else {
@@ -112,7 +116,10 @@ impl AgentTool for ReadRuneNoteTool {
         }
 
         if !full_path.exists() {
-            return format!("Error: Rune-note '{}' not found in .rune/notes/.", note_path);
+            return format!(
+                "Error: Rune-note '{}' not found in .rune/notes/.",
+                note_path
+            );
         }
 
         match fs::read_to_string(&full_path) {

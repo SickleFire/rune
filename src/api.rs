@@ -1184,7 +1184,10 @@ impl Agent {
         // Auto-truncate history / hierarchical context sliding window if character/token count gets too large (> 20,000 chars)
         let (_, chars) = self.get_history_stats();
         if chars > 20000 {
-            println!("[Rune Hierarchical Context: Conversation history reached {} chars. Applying sliding-window summarization & selective pruning]", chars);
+            println!(
+                "[Rune Hierarchical Context: Conversation history reached {} chars. Applying sliding-window summarization & selective pruning]",
+                chars
+            );
             self.truncate_history(8);
         }
 
@@ -1245,7 +1248,7 @@ impl Agent {
                 self.history.push(CanonicalMessage::User(
                     "[System Notice: You have reached the maximum allowed tool iterations for this prompt. Please synthesize your final answer now based on the information gathered so far without making further tool calls.]".to_string()
                 ));
-                
+
                 // Immediately invoke provider one final time to let the model synthesize its answer!
                 let streamed_text = Arc::new(Mutex::new(String::new()));
                 let streamed_text_for_callback = Arc::clone(&streamed_text);
@@ -1380,7 +1383,7 @@ impl Agent {
 
                 let futures = read_only.into_iter().map(|tc| {
                     let ro_dynamic = ro_dynamic.clone();
-                    
+
                     println!("\n[Executing read-only tool concurrently: {}]", tc.name);
                     async move {
                         let output = if let Some(tool) = ro_dynamic.get(&tc.name) {
@@ -1594,14 +1597,23 @@ impl Agent {
                     // Selective pruning / token optimization for massive files (> 500 lines or > 20,000 chars)
                     let line_count = content.lines().count();
                     let final_content = if line_count > 500 || content.len() > 20000 {
-                        println!("[Rune: Large file @{} detected ({} lines). Applying selective context pruning & outline extraction]", clean, line_count);
-                        let mut outline = format!("// [Rune Selective Pruning: File @{} is large ({} lines). Showing structural symbol outline and first 100 lines. Use read_file with start_line/end_line for specific ranges]\n", clean, line_count);
-                        
+                        println!(
+                            "[Rune: Large file @{} detected ({} lines). Applying selective context pruning & outline extraction]",
+                            clean, line_count
+                        );
+                        let mut outline = format!(
+                            "// [Rune Selective Pruning: File @{} is large ({} lines). Showing structural symbol outline and first 100 lines. Use read_file with start_line/end_line for specific ranges]\n",
+                            clean, line_count
+                        );
+
                         // Extract first 100 lines
-                        let first_100: String = content.lines().take(100).collect::<Vec<_>>().join("\n");
+                        let first_100: String =
+                            content.lines().take(100).collect::<Vec<_>>().join("\n");
                         outline.push_str(&first_100);
-                        outline.push_str("\n\n// ... [Middle sections pruned for token efficiency] ...\n\n");
-                        
+                        outline.push_str(
+                            "\n\n// ... [Middle sections pruned for token efficiency] ...\n\n",
+                        );
+
                         // Extract last 50 lines
                         let lines: Vec<&str> = content.lines().collect();
                         if lines.len() > 150 {
