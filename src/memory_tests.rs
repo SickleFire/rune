@@ -88,7 +88,7 @@ mod tests {
                 "notes": "initializes modules"
             }))
             .await;
-        assert!(res4.contains("Successfully recorded file and symbol relationship"));
+        assert!(res4.contains("Successfully recorded file and symbol relationship."));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
         unsafe {

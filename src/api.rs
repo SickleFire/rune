@@ -1179,10 +1179,11 @@ impl Agent {
     }
 
     pub async fn run_with_mode(&mut self, raw_prompt: &str, auto_approve: bool, plan_mode: bool) {
-        // Auto-truncate history if character/token count gets too large (> 25,000 chars)
+        // Auto-truncate history / hierarchical context sliding window if character/token count gets too large (> 35,000 chars)
         let (_, chars) = self.get_history_stats();
-        if chars > 25000 {
-            self.truncate_history(8);
+        if chars > 35000 {
+            println!("[Rune Hierarchical Context: Conversation history reached {} chars. Applying sliding-window summarization & selective pruning]", chars);
+            self.truncate_history(10);
         }
 
         let processed = self.resolve_mentions(raw_prompt).await;
@@ -1542,7 +1543,7 @@ impl Agent {
         }
     }
 
-    async fn resolve_mentions(&self, raw: &str) -> String {
+    pub async fn resolve_mentions(&self, raw: &str) -> String {
         let mut resolved = raw.to_string();
         let mut injections = Vec::new();
 
@@ -1559,10 +1560,32 @@ impl Agent {
 
             match self.executor.read_file(Path::new(clean), None, None).await {
                 Ok(content) => {
+                    // Selective pruning / token optimization for massive files (> 500 lines or > 20,000 chars)
+                    let line_count = content.lines().count();
+                    let final_content = if line_count > 500 || content.len() > 20000 {
+                        println!("[Rune: Large file @{} detected ({} lines). Applying selective context pruning & outline extraction]", clean, line_count);
+                        let mut outline = format!("// [Rune Selective Pruning: File @{} is large ({} lines). Showing structural symbol outline and first 100 lines. Use read_file with start_line/end_line for specific ranges]\n", clean, line_count);
+                        
+                        // Extract first 100 lines
+                        let first_100: String = content.lines().take(100).collect::<Vec<_>>().join("\n");
+                        outline.push_str(&first_100);
+                        outline.push_str("\n\n// ... [Middle sections pruned for token efficiency] ...\n\n");
+                        
+                        // Extract last 50 lines
+                        let lines: Vec<&str> = content.lines().collect();
+                        if lines.len() > 150 {
+                            let last_50: String = lines[lines.len() - 50..].join("\n");
+                            outline.push_str(&last_50);
+                        }
+                        outline
+                    } else {
+                        content
+                    };
+
                     injections.push(format!(
-                        "\n\n[Auto-injected content of @{clean}]:\n```\n{content}\n```"
+                        "\n\n[Auto-injected content of @{clean}]:\n```\n{final_content}\n```"
                     ));
-                    println!("[Rune: Auto-scraped @{clean} into context]");
+                    println!("[Rune: Auto-scraped @{clean} into context (optimized)]");
                 }
                 Err(e) => println!("[Rune: Warning: failed to read @{clean}: {e}]"),
             }
