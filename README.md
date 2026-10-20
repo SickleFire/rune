@@ -4,12 +4,14 @@
 [![Release](https://github.com/SickleFire/rune/actions/workflows/release.yml/badge.svg)](https://github.com/SickleFire/rune/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.md)
 
-Rune is an expert AI coding assistant integrated into a software development workspace and Unity game development environment, built in Rust. It provides an interactive REPL/CLI interface, tool execution (file operations, command execution, git operations, code searching, Unity Editor integration, web utilities), and seamless API integration with LLM providers.
+Rune is an expert AI coding assistant integrated into a software development workspace, Unity, and Godot game development environments, built in Rust. It provides an interactive REPL/CLI interface, tool execution (file operations, command execution, git operations, code searching, Unity and Godot Editor integration, web utilities, persistent memory, and Rune Notes knowledge graph), and seamless API integration with LLM providers.
 
 ## Features
 
 - **Interactive REPL & CLI**: Powered by `rustyline` with colorized output and prompt support.
 - **Tool Execution Framework**: Rich set of built-in tools for workspace inspection, file reading/writing/patching, executing shell commands, and git operations.
+- **Rune Notes Knowledge Graph**: Persistent Markdown knowledge nodes in `.rune/notes/` featuring Wiki-style cross-linking (`[[note.md]]`) and architectural awareness.
+- **Persistent Memory**: Storage for agent preferences, code solutions, and file relationship maps (`src/memory.rs`).
 - **Web Utility Tools**: Built-in HTTP request execution (`http_request`), web page scraping/fetching (`fetch_web_page`), and TCP port verification (`check_tcp_port`).
 - **Docker Container Tools**: Optional Docker integration (`--docker` flag) supporting container listing (`docker_list_containers`), container logs (`docker_container_logs`), container starting/stopping (`docker_start_container`, `docker_stop_container`), image listing (`docker_list_images`), and container inspection (`docker_inspect_container`).
 - **MySQL Database Tools**: Optional MySQL integration (`--mysql`) supporting listing tables (`mysql_list_tables`), describing table schemas (`mysql_describe_table`), and executing SQL queries (`mysql_execute_query`).
