@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rune Notes Knowledge Graph</title>
+<script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<style>
+  :root { --bg: #000000; --panel: #050505; --border: #1a1a1a; --text: #ededed; --muted: #737373; --accent: #fafafa; }
+  * { scrollbar-width: thin; scrollbar-color: #262626 transparent; }
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 0; display: flex; height: 100vh; overflow: hidden; -webkit-font-smoothing: antialiased; }
+  .sidebar { width: 320px; background: linear-gradient(180deg, #0e0e0e 0%, #050505 45%, #000000 100%); border-right: 1px solid var(--border); display: flex; flex-direction: column; z-index: 10; }
+  .sidebar-header { padding: 28px 20px 18px; border-bottom: 1px solid var(--border); }
+  .sidebar-header h2 { margin: 0; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.22em; text-transform: uppercase; background: linear-gradient(90deg, #ffffff 0%, #5c5c5c 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .search-box { width: 100%; padding: 9px 12px; margin-top: 16px; background: linear-gradient(180deg, #0b0b0b, #000000); border: 1px solid var(--border); color: var(--text); border-radius: 6px; box-sizing: border-box; font-size: 0.85rem; outline: none; transition: border-color 0.2s; }
+  .search-box::placeholder { color: #525252; }
+  .search-box:focus { border-color: #404040; }
+  .note-list { overflow-y: auto; flex: 1; padding: 12px; list-style: none; margin: 0; }
+  .note-item { padding: 9px 12px; margin-bottom: 2px; border-radius: 6px; cursor: pointer; color: var(--muted); font-size: 0.85rem; border-left: 2px solid transparent; transition: all 0.2s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .note-item:hover { background: linear-gradient(90deg, #151515 0%, rgba(0,0,0,0) 100%); color: var(--text); }
+  .note-item.active { background: linear-gradient(90deg, #262626 0%, rgba(0,0,0,0) 100%); border-left-color: #fafafa; color: #ffffff; font-weight: 500; }
+  main { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); position: relative; }
+  #graph-view { flex: 1; width: 100%; height: 100%; background: radial-gradient(ellipse at 50% 40%, #0d0d0d 0%, #050505 40%, #000000 80%); }
+  .reader-pane { position: absolute; top: 0; right: 0; width: 55%; height: 100%; background: linear-gradient(180deg, #0c0c0c 0%, #040404 40%, #000000 100%); border-left: 1px solid var(--border); box-shadow: -20px 0 60px rgba(0,0,0,0.9); display: flex; flex-direction: column; z-index: 20; transform: translateX(100%); transition: transform 0.3s ease; }
+  .reader-pane.open { transform: translateX(0); }
+  .content-header { padding: 18px 28px; border-bottom: 1px solid var(--border); background: linear-gradient(90deg, #111111 0%, #000000 100%); font-size: 0.75rem; letter-spacing: 0.05em; color: var(--muted); display: flex; justify-content: space-between; align-items: center; }
+  .close-btn { background: none; border: none; color: var(--muted); font-size: 1.25rem; line-height: 1; cursor: pointer; transition: color 0.2s; }
+  .close-btn:hover { color: #ffffff; }
+  .content-body { flex: 1; padding: 36px 40px; overflow-y: auto; line-height: 1.7; font-size: 0.95rem; color: #d4d4d4; }
+  .content-body pre.plain { white-space: pre-wrap; word-wrap: break-word; font-family: monospace; }
+  .content-body h1, .content-body h2, .content-body h3 { color: #ffffff; font-weight: 600; letter-spacing: -0.01em; }
+  .content-body h1 { background: linear-gradient(90deg, #ffffff 0%, #6b6b6b 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  code { background: #0a0a0a; padding: 2px 6px; border-radius: 4px; font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.85em; border: 1px solid var(--border); color: #e5e5e5; }
+  pre code { display: block; padding: 16px; overflow-x: auto; background: linear-gradient(180deg, #0b0b0b, #000000); }
+  a { color: #ffffff; text-decoration: none; border-bottom: 1px solid #404040; transition: border-color 0.2s; }
+  a:hover { border-bottom-color: #ffffff; }
+  blockquote { border-left: 2px solid #404040; margin: 0; padding-left: 16px; color: var(--muted); }
+  hr { border: none; height: 1px; background: linear-gradient(90deg, #2a2a2a, rgba(0,0,0,0)); }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+  th, td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+  th { background: linear-gradient(180deg, #121212, #050505); }
+  .graph-legend { position: absolute; bottom: 24px; left: 24px; background: linear-gradient(180deg, rgba(14,14,14,0.9), rgba(0,0,0,0.9)); border: 1px solid var(--border); padding: 12px 16px; border-radius: 8px; font-size: 0.75rem; letter-spacing: 0.03em; color: var(--muted); backdrop-filter: blur(6px); pointer-events: none; z-index: 5; }
+  .legend-item { display: flex; align-items: center; margin-bottom: 4px; }
+  .legend-dot { width: 8px; height: 8px; border-radius: 50%; margin-right: 10px; }
+</style>
+</head>
+<body>
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <h2>Rune Notes</h2>
+    <input type="text" class="search-box" id="search" placeholder="Search notes..." oninput="filterNotes()">
+  </div>
+  <ul class="note-list" id="noteList">
+    <li class="note-item" onclick="openNoteIndex(0)" data-path="architecture.md" title="architecture.md">architecture.md</li>
+    <li class="note-item" onclick="openNoteIndex(1)" data-path="concepts/rune-notes-convention.md" title="concepts/rune-notes-convention.md">concepts/rune-notes-convention.md</li>
+    <li class="note-item" onclick="openNoteIndex(2)" data-path="game_engines.md" title="game_engines.md">game_engines.md</li>
+    <li class="note-item" onclick="openNoteIndex(3)" data-path="godot/godot.md" title="godot/godot.md">godot/godot.md</li>
+    <li class="note-item" onclick="openNoteIndex(4)" data-path="overview.md" title="overview.md">overview.md</li>
+    <li class="note-item" onclick="openNoteIndex(5)" data-path="src/overview.md" title="src/overview.md">src/overview.md</li>
+    <li class="note-item" onclick="openNoteIndex(6)" data-path="src/src.md" title="src/src.md">src/src.md</li>
+    <li class="note-item" onclick="openNoteIndex(7)" data-path="unity/unity.md" title="unity/unity.md">unity/unity.md</li>
+
+  </ul>
+</aside>
+<main>
+  <div id="graph-view"></div>
+  <div class="graph-legend">
+    <div class="legend-item"><div class="legend-dot" style="background: linear-gradient(135deg, #ffffff, #737373);"></div>Note</div>
+    <div class="legend-item"><div class="legend-dot" style="background: linear-gradient(135deg, #525252, #1a1a1a);"></div>Link</div>
+    <div style="margin-top: 6px; color: #525252;">Click a node to read it</div>
+  </div>
+  <div class="reader-pane" id="readerPane">
+    <div class="content-header">
+      <span id="contentHeader">Viewing: </span>
+      <button class="close-btn" onclick="closeReader()">×</button>
+    </div>
+    <div class="content-body" id="contentBody"></div>
+  </div>
+</main>
+<script>
+  const rawNodes = [{"id":"note_0","label":"architecture.md","title":"architecture.md"},{"id":"note_1","label":"rune-notes-convention.md","title":"concepts/rune-notes-convention.md"},{"id":"note_2","label":"game_engines.md","title":"game_engines.md"},{"id":"note_3","label":"godot.md","title":"godot/godot.md"},{"id":"note_4","label":"overview.md","title":"overview.md"},{"id":"note_5","label":"overview.md","title":"src/overview.md"},{"id":"note_6","label":"src.md","title":"src/src.md"},{"id":"note_7","label":"unity.md","title":"unity/unity.md"}];
+  const rawEdges = [{"from":"note_0","to":"note_3"},{"from":"note_0","to":"note_7"},{"from":"note_0","to":"note_4"},{"from":"note_0","to":"note_5"},{"from":"note_0","to":"note_2"},{"from":"note_1","to":"note_0"},{"from":"note_1","to":"note_2"},{"from":"note_2","to":"note_3"},{"from":"note_2","to":"note_7"},{"from":"note_2","to":"note_0"}];
+  const notesData = {"note_0":{"content":"---\ntitle: \"Architecture & Core Modules\"\ntype: \"concept-node\"\ntags: [\"architecture\", \"modules\", \"src\"]\nlast_updated: \"2025-02-20\"\n---\n\n# Architecture & Core Modules\n\nThis note maps out the source files in `src/` and their roles in the Rune assistant ecosystem:\n\n- **`src/main.rs` & `src/lib.rs`**: Entry point and library exports.\n- **`src/agent.rs`**: Multi-agent orchestration (Architect, Coder, planning and review loops).\n- **`src/api.rs`**: LLM API client definitions and tool declaration models.\n- **`src/config.rs`**: Configuration handling (`rune.toml`, environment variables).\n- **`src/tools.rs`**: Core tool registry and trait definitions (`AgentTool`).\n- **`src/memory.rs` & `src/memory_tools.rs`**: Persistent storage for agent preferences, code solutions, and file relationship maps.\n- **`src/notes_tools.rs`**: Rune Notes management (`list_rune_notes`, `read_rune_note`, `upsert_rune_note`).\n- **Integration Tools**:\n  - `github_tools.rs`\n  - `docker_tools.rs`\n  - `mysql_tools.rs`\n  - `godot_tools.rs` (see [[godot/godot.md|Godot Integration Reference]]) & `unity_tools.rs` (see [[unity/unity.md|Unity Integration Reference]])\n  - `web_tools.rs`\n\n---\n## Related Notes\n- See [[src/overview.md|Source Modules overview]] for detailed module breakdown.\n- See [[game_engines.md|Game Engines overview]] for cross-engine bridge architecture.\n","id":"note_0","path":"architecture.md"},"note_1":{"content":"---\ntitle: \"Rune Notes Conventions\"\ntype: \"concept-node\"\ntags: [\"convention\", \"rune-notes\", \"guidelines\"]\nlast_updated: \"2025-02-20\"\n---\n\n# Rune Notes Conventions\n\nRune Notes serve as a persistent, token-efficient knowledge base in `.rune/notes/` that allows Rune to retain context across sessions.\n\n## 1. Directory & File Conventions\n- **Root Store:** `.rune/notes/`\n- **File Naming Conventions:**\n  - File-associated notes mirror the repository structure: e.g., `.rune/notes/src/api.rs.md`.\n  - Standalone concept/idea/architecture nodes: e.g., `.rune/notes/concepts/godot-integration.md` or `.rune/notes/architecture.md`.\n\n## 2. Best Practices for Rune\n- **Priority Rule:** When starting any task, Rune should **first check and read relevant rune-notes** in `.rune/notes/` via `list_rune_notes` and `read_rune_note` before diving into raw source code files. This provides high-level architectural context and historical decisions instantly in a token-efficient manner.\n- **Cross-Linking:** Use Wiki-style markdown links (`[[relative/path/to/note.md|Display Name]]`) to connect related architectural modules, concepts, and file references together into a navigable knowledge graph (e.g., linking [[architecture.md|Architecture]] to [[game_engines.md|Game Engines]]).\n- Create or update notes whenever architectural decisions, recurring bug patterns, or complex subsystem APIs are established or modified.\n","id":"note_1","path":"concepts/rune-notes-convention.md"},"note_2":{"content":"---\ntitle: \"Game Engine Bridges (Godot & Unity)\"\ntype: \"concept-node\"\ntags: [\"godot\", \"unity\", \"integration\"]\nlast_updated: \"2025-02-20\"\n---\n\n# Game Engine Integration Bridges\n\nRune provides bidirectional bridges and plugins for game development engines:\n\n## Godot (`godot/`)\n- **`RuneBridge.cs`**: C# bridge implementation for Godot.\n- **`RuneBridge.gd`**: GDScript counterpart for Godot integration.\n- **`RuneBridgePlugin.cs`**: Godot editor plugin for Rune.\n- **`plugin.cfg`**: Godot plugin configuration metadata.\n- *Reference:* See [[godot/godot.md|Godot Integration Reference]].\n\n## Unity (`unity/`)\n- **`RuneBridge.cs`**: Unity C# script / bridge component.\n- *Reference:* See [[unity/unity.md|Unity Integration Reference]].\n\n---\n## Related Notes\n- See main [[architecture.md|Architecture & Core Modules]] for backend integration tools (`godot_tools.rs`, `unity_tools.rs`).\n","id":"note_2","path":"game_engines.md"},"note_3":{"content":"---\ntitle: \"Godot Integration Reference (`godot/`)\"\ntype: \"reference-node\"\ntags: [\"godot\", \"csharp\", \"gdscript\", \"plugin\"]\nlast_updated: \"2025-02-20`\"\n---\n\n# Godot Integration Reference (`godot/`)\n\nContains C# scripts, GDScript files, and plugin configuration for Godot engine integration:\n- `godot/RuneBridge.cs`: C# bridge for Rune integration within Godot.\n- `godot/RuneBridge.gd`: GDScript helper script for editor/runtime hooks.\n- `godot/RuneBridgePlugin.cs`: Godot editor plugin implementation.\n- `godot/plugin.cfg`: Godot plugin metadata configuration.\n","id":"note_3","path":"godot/godot.md"},"note_4":{"content":"---\ntitle: \"Rune Repository Overview\"\ntype: \"concept-node\"\ntags: [\"architecture\", \"overview\", \"rune-notes\"]\nlast_updated: \"2025-02-20\"\n---\n\n# Rune Repository Overview\n\nRune is an expert AI coding assistant integration framework written in Rust.\n\n## Rune Notes Conventions & Initialization\n- **Root Store:** `.rune/notes/`\n- **File Naming Conventions:**\n  - File-associated notes mirror the repo structure: e.g., `.rune/notes/src/api.rs.md`\n  - Standalone concept/idea nodes: e.g., `.rune/notes/concepts/godot-integration.md` or `.rune/notes/architecture.md`\n- **Agent Workflow:** When exploring unfamiliar codebase sections or tackling complex tasks, Rune checks and reads relevant rune notes in `.rune/notes/` first to maintain context across sessions without bloating the active token window.\n\n## Key Subsystems\n- **Agent Orchestration (`src/agent.rs`)**: Multi-agent coordination (Architect + Coder roles).\n- **Tool Ecosystem (`src/tools.rs`, `src/*_tools.rs`)**: Extensible tools for GitHub, Docker, MySQL, Unity, Godot, Web search, and now **Rune Notes** (`.rune/notes/`).\n- **Memory Subsystem (`src/memory.rs`, `src/memory_tools.rs`)**: Persistent JSON memory store for preferences, past fixes, and file relationships.\n- **Rune Notes (`.rune/notes/`)**: Markdown-based knowledge nodes allowing Rune to read, save, and navigate contextual ideas and file-specific insights across sessions without bloating token windows.\n","id":"note_4","path":"overview.md"},"note_5":{"content":"---\ntitle: \"Source Modules (`src/`)\"\ntype: \"architecture-node\"\ntags: [\"src\", \"modules\", \"rust\", \"tools\", \"agent\"]\nlast_updated: \"2025-02-20\"\n---\n\n# Source Modules (`src/`)\n\nThis directory contains the core Rust implementation of Rune. Below is an inventory of the modules and their responsibilities:\n\n## Core Engine & Orchestration\n- **`lib.rs`**: Library root, module declarations, and public re-exports.\n- **`main.rs`**: Application entry point, CLI parsing, and interactive loop / command dispatch.\n- **`config.rs`**: Configuration loading and parsing (`rune.toml`, API keys, model parameters).\n- **`agent.rs`**: Core agent logic, conversation state machine, planning, tool execution loops, and prompt construction.\n- **`api.rs`**: API client implementations for interacting with LLM providers (e.g. Gemini, OpenAI, etc.) and handling tool call declarations / responses.\n\n## Tool System & Specialized Integrations\n- **`tools.rs`**: Central tool registry, definitions, and execution dispatcher trait (`AgentTool`).\n- **`memory.rs` & `memory_tools.rs`**: Persistent storage mechanism (`memory.json`) and tools for recalling past fixes, storing preferences, and recording file relationships.\n- **`notes_tools.rs`**: Tools enabling the assistant to list, read, and upsert Rune Notes in `.rune/notes/`.\n- **`github_tools.rs`**: GitHub integrations (issues, PRs, workflow checks).\n- **`docker_tools.rs`**: Docker container management and inspection tools.\n- **`mysql_tools.rs`**: MySQL database connectivity and query tools.\n- **`godot_tools.rs` & `unity_tools.rs`**: Game engine integration helpers for Godot and Unity projects.\n- **`web_tools.rs`**: Web scraping and HTTP request tools.\n- **`memory_tests.rs`**: Unit tests for memory and state tracking.\n","id":"note_5","path":"src/overview.md"},"note_6":{"content":"---\ntitle: \"Source File Reference (`src/`)\"\ntype: \"reference-node\"\ntags: [\"src\", \"rust\", \"files\", \"reference\"]\nlast_updated: \"2025-02-20\"\n---\n\n# Source File Reference (`src/`)\n\nDetailed breakdown of each source file in `src/`:\n\n- `@src/main.rs`: Entry point (`fn main()`), CLI parsing, and bootstrapping.\n- `@src/lib.rs`: Library crate root, exposing modules (`agent`, `api`, `tools`, etc.).\n- `@src/agent.rs`: Orchestration of LLM reasoning cycles, multi-turn tool calling, and response synthesis.\n- `@src/api.rs`: Structs and methods for API requests to LLMs and tool declaration schemas.\n- `@src/config.rs`: Configuration structs (`Config`) loading from environment variables and `rune.toml`.\n- `@src/tools.rs`: Tool dispatcher and `AgentTool` trait definitions.\n- `@src/memory.rs` & `@src/memory_tools.rs`: Storage logic and tools for persistent cross-session memory (`memory.json`).\n- `@src/memory_tests.rs`: Tests covering memory persistence and retrieval.\n- `@src/notes_tools.rs`: Tools for programmatic reading, listing, and writing of Rune Notes in `.rune/notes/`.\n- `@src/github_tools.rs`: GitHub tool implementations.\n- `@src/docker_tools.rs`: Docker container and image management tools.\n- `@src/mysql_tools.rs`: MySQL database query and inspection tools.\n- `@src/godot_tools.rs` & `@src/unity_tools.rs`: Game engine integration utilities.\n- `@src/web_tools.rs`: Web requests and parsing.\n","id":"note_6","path":"src/src.md"},"note_7":{"content":"---\ntitle: \"Unity Integration Reference (`unity/`)\"\ntype: \"reference-node\"\ntags: [\"unity\", \"csharp\"]\nlast_updated: \"2025-02-20\"\n---\n\n# Unity Integration Reference (`unity/`)\n\nContains C# scripts for Unity engine integration:\n- `unity/RuneBridge.cs`: Unity bridge script providing editor and runtime communication hooks.\n","id":"note_7","path":"unity/unity.md"}};
+
+  const nodes = new vis.DataSet(rawNodes.map(n => ({
+    id: n.id,
+    label: n.label,
+    title: n.title,
+    group: 'notes',
+    shape: 'box',
+    margin: 10,
+    borderWidth: 2,
+    shapeProperties: { borderRadius: 6 },
+    color: {
+      background: '#000000',
+      border: '#404040',
+      highlight: { background: '#171717', border: '#fafafa' },
+      hover: { background: '#0f0f0f', border: '#8a8a8a' }
+    },
+    font: { color: '#e5e5e5', size: 13, face: 'Inter, -apple-system, Segoe UI, Roboto, sans-serif' }
+  })));
+  const edges = new vis.DataSet(rawEdges.map(e => ({
+    from: e.from,
+    to: e.to,
+    color: { color: '#2a2a2a', highlight: '#fafafa', hover: '#737373' },
+    width: 1,
+    arrows: { to: { enabled: true, scaleFactor: 0.4 } }
+  })));
+
+  const container = document.getElementById('graph-view');
+  const options = {
+    physics: {
+      barnesHut: {
+        gravitationalConstant: -3000,
+        centralGravity: 0.3,
+        springLength: 120,
+        springConstant: 0.04,
+        damping: 0.09
+      }
+    },
+    interaction: { hover: true, tooltipDelay: 200 },
+    nodes: { shadow: false },
+    edges: { shadow: false, smooth: { type: 'cubicBezier', roundness: 0.2 } }
+  };
+  const network = new vis.Network(container, { nodes: nodes, edges: edges }, options);
+
+  network.on('click', function (params) {
+    if (params.nodes.length > 0) {
+      selectNote(params.nodes[0]);
+    }
+  });
+
+  function openNoteIndex(idx) {
+    selectNote('note_' + idx);
+    network.selectNodes(['note_' + idx]);
+  }
+
+  function selectNote(id) {
+    const note = notesData[id];
+    if (!note) return;
+
+    document.querySelectorAll('.note-item').forEach(i => i.classList.remove('active'));
+    for (const item of document.querySelectorAll('.note-item')) {
+      if (item.getAttribute('data-path') === note.path) {
+        item.classList.add('active');
+        break;
+      }
+    }
+
+    document.getElementById('contentHeader').textContent = 'Viewing: ' + note.path;
+    const body = document.getElementById('contentBody');
+
+    try {
+      if (window.marked) {
+        // Strip YAML frontmatter so it doesn't render as a stray heading/hr.
+        const md = note.content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
+        const parse = marked.parse ? marked.parse.bind(marked) : marked;
+        let htmlContent = parse(md);
+        htmlContent = htmlContent.replace(/\[\[([^\]\|]+)(?:\|([^\]]+))?\]\]/g, function (m, p1, p2) {
+          const label = (p2 || p1).trim();
+          return '<a href="#" class="wikilink" data-target="' + encodeURIComponent(p1.trim()) + '">' + label + '</a>';
+        });
+        body.innerHTML = htmlContent;
+      } else {
+        const pre = document.createElement('pre');
+        pre.className = 'plain';
+        pre.textContent = note.content;
+        body.innerHTML = '';
+        body.appendChild(pre);
+      }
+    } catch (err) {
+      console.error('Failed to render note', err);
+      const pre = document.createElement('pre');
+      pre.className = 'plain';
+      pre.textContent = note.content;
+      body.innerHTML = '';
+      body.appendChild(pre);
+    }
+
+    body.scrollTop = 0;
+    document.getElementById('readerPane').classList.add('open');
+  }
+
+  document.getElementById('contentBody').addEventListener('click', function (e) {
+    const a = e.target.closest('a.wikilink');
+    if (!a) return;
+    e.preventDefault();
+    openNoteByPath(decodeURIComponent(a.getAttribute('data-target')));
+  });
+
+  function closeReader() {
+    document.getElementById('readerPane').classList.remove('open');
+    document.querySelectorAll('.note-item').forEach(i => i.classList.remove('active'));
+    network.unselectAll();
+  }
+
+  function openNoteByPath(path) {
+    for (const [id, note] of Object.entries(notesData)) {
+      if (note.path === path || note.path.endsWith('/' + path) || path.endsWith('/' + note.path)) {
+        selectNote(id);
+        network.selectNodes([id]);
+        return;
+      }
+    }
+  }
+
+  function filterNotes() {
+    const q = document.getElementById('search').value.toLowerCase();
+    document.querySelectorAll('.note-item').forEach(item => {
+      const text = item.textContent.toLowerCase();
+      item.style.display = text.includes(q) ? 'block' : 'none';
+    });
+  }
+</script>
+</body>
+</html>

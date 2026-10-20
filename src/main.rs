@@ -1112,9 +1112,15 @@ mysql_url = "{new_mysql_url}"
                 if prompt.eq_ignore_ascii_case("/render") || prompt.starts_with("/render ") {
                     use rune_code::tools::AgentTool;
                     let parts: Vec<&str> = prompt.split_whitespace().collect();
-                    let output_path = if parts.len() > 1 { parts[1] } else { "rune_notes.html" };
+                    let output_path = if parts.len() > 1 {
+                        parts[1]
+                    } else {
+                        "rune_notes.html"
+                    };
                     let tool = rune_code::notes_tools::RenderRuneNotesTool;
-                    let result: String = tool.execute(serde_json::json!({ "output_path": output_path })).await;
+                    let result: String = tool
+                        .execute(serde_json::json!({ "output_path": output_path }))
+                        .await;
                     println!("{}", result.green());
                     continue;
                 }

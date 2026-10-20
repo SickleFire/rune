@@ -2,8 +2,9 @@ use crate::api::FunctionDeclaration;
 use crate::tools::AgentTool;
 use async_trait::async_trait;
 use serde_json::json;
+use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
 fn notes_dir() -> PathBuf {
     if let Ok(cwd) = std::env::current_dir() {
@@ -12,6 +13,50 @@ fn notes_dir() -> PathBuf {
         return dir;
     }
     PathBuf::from(".rune/notes")
+}
+
+/// Only allow plain relative paths (no `..`, no absolute paths, no drive prefixes).
+fn is_safe_rel(p: &str) -> bool {
+    let path = Path::new(p);
+    !p.is_empty()
+        && path
+            .components()
+            .all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+/// Recursively collect all markdown files under `dir`, returning (relative_path, absolute_path).
+fn collect_note_files(dir: &Path) -> Vec<(String, PathBuf)> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(path) = stack.pop() {
+        if let Ok(entries) = fs::read_dir(path) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if p
+                    .extension()
+                    .map_or(false, |ext| ext == "md" || ext == "markdown")
+                {
+                    let rel = match p.strip_prefix(dir) {
+                        Ok(r) => r.to_string_lossy().replace('\\', "/"),
+                        Err(_) => p.to_string_lossy().replace('\\', "/"),
+                    };
+                    out.push((rel, p));
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
 }
 
 pub struct ListRuneNotesTool;
@@ -41,29 +86,11 @@ impl AgentTool for ListRuneNotesTool {
             return "No rune-notes directory found (.rune/notes/ is empty).".to_string();
         }
 
-        let mut notes = Vec::new();
-        let mut stack = vec![dir.clone()];
-        while let Some(path) = stack.pop() {
-            if let Ok(entries) = fs::read_dir(path) {
-                for entry in entries.flatten() {
-                    let p = entry.path();
-                    if p.is_dir() {
-                        stack.push(p);
-                    } else if p
-                        .extension()
-                        .map_or(false, |ext| ext == "md" || ext == "markdown")
-                    {
-                        if let Ok(rel) = p.strip_prefix(&dir) {
-                            notes.push(rel.to_string_lossy().to_string());
-                        } else {
-                            notes.push(p.to_string_lossy().to_string());
-                        }
-                    }
-                }
-            }
-        }
+        let notes: Vec<String> = collect_note_files(&dir)
+            .into_iter()
+            .map(|(rel, _)| rel)
+            .collect();
 
-        notes.sort();
         if notes.is_empty() {
             return "No rune-notes (.md files) found in .rune/notes/.".to_string();
         }
@@ -103,23 +130,28 @@ impl AgentTool for ReadRuneNoteTool {
             None => return "Error: 'note_path' parameter is required.".to_string(),
         };
 
+        if !is_safe_rel(note_path) {
+            return "Error: Access denied (path outside .rune/notes/).".to_string();
+        }
+
         let dir = notes_dir();
         let full_path = dir.join(note_path);
-
-        // Security check against directory traversal
-        if let Ok(canonical_dir) = fs::canonicalize(&dir) {
-            if let Ok(canonical_target) = fs::canonicalize(&full_path) {
-                if !canonical_target.starts_with(&canonical_dir) {
-                    return "Error: Access denied (path outside .rune/notes/).".to_string();
-                }
-            }
-        }
 
         if !full_path.exists() {
             return format!(
                 "Error: Rune-note '{}' not found in .rune/notes/.",
                 note_path
             );
+        }
+
+        // Defense in depth: resolve symlinks and make sure we are still inside the notes dir.
+        match (fs::canonicalize(&dir), fs::canonicalize(&full_path)) {
+            (Ok(canonical_dir), Ok(canonical_target)) => {
+                if !canonical_target.starts_with(&canonical_dir) {
+                    return "Error: Access denied (path outside .rune/notes/).".to_string();
+                }
+            }
+            _ => return "Error: Could not resolve note path.".to_string(),
         }
 
         match fs::read_to_string(&full_path) {
@@ -168,20 +200,23 @@ impl AgentTool for UpsertRuneNoteTool {
             None => return "Error: 'content' parameter is required.".to_string(),
         };
 
+        // Validate BEFORE creating any directories.
+        if !is_safe_rel(note_path) {
+            return "Error: Access denied (path outside .rune/notes/).".to_string();
+        }
+
         let dir = notes_dir();
         let full_path = dir.join(note_path);
 
-        // Create parent directories if needed
         if let Some(parent) = full_path.parent() {
-            let _ = fs::create_dir_all(parent);
-        }
-
-        if let Ok(canonical_dir) = fs::canonicalize(&dir) {
-            if let Some(parent) = full_path.parent() {
-                if let Ok(canonical_parent) = fs::canonicalize(parent) {
-                    if !canonical_parent.starts_with(&canonical_dir) {
-                        return "Error: Access denied (path outside .rune/notes/).".to_string();
-                    }
+            if let Err(e) = fs::create_dir_all(parent) {
+                return format!("Error creating directories for '{}': {}", note_path, e);
+            }
+            if let (Ok(canonical_dir), Ok(canonical_parent)) =
+                (fs::canonicalize(&dir), fs::canonicalize(parent))
+            {
+                if !canonical_parent.starts_with(&canonical_dir) {
+                    return "Error: Access denied (path outside .rune/notes/).".to_string();
                 }
             }
         }
@@ -191,6 +226,225 @@ impl AgentTool for UpsertRuneNoteTool {
             Err(e) => format!("Error saving rune-note '{}': {}", note_path, e),
         }
     }
+}
+
+const GRAPH_TEMPLATE: &str = r###"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rune Notes Knowledge Graph</title>
+<script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<style>
+  :root { --bg: #000000; --panel: #050505; --border: #1a1a1a; --text: #ededed; --muted: #737373; --accent: #fafafa; }
+  * { scrollbar-width: thin; scrollbar-color: #262626 transparent; }
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 0; display: flex; height: 100vh; overflow: hidden; -webkit-font-smoothing: antialiased; }
+  .sidebar { width: 320px; background: linear-gradient(180deg, #0e0e0e 0%, #050505 45%, #000000 100%); border-right: 1px solid var(--border); display: flex; flex-direction: column; z-index: 10; }
+  .sidebar-header { padding: 28px 20px 18px; border-bottom: 1px solid var(--border); }
+  .sidebar-header h2 { margin: 0; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.22em; text-transform: uppercase; background: linear-gradient(90deg, #ffffff 0%, #5c5c5c 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .search-box { width: 100%; padding: 9px 12px; margin-top: 16px; background: linear-gradient(180deg, #0b0b0b, #000000); border: 1px solid var(--border); color: var(--text); border-radius: 6px; box-sizing: border-box; font-size: 0.85rem; outline: none; transition: border-color 0.2s; }
+  .search-box::placeholder { color: #525252; }
+  .search-box:focus { border-color: #404040; }
+  .note-list { overflow-y: auto; flex: 1; padding: 12px; list-style: none; margin: 0; }
+  .note-item { padding: 9px 12px; margin-bottom: 2px; border-radius: 6px; cursor: pointer; color: var(--muted); font-size: 0.85rem; border-left: 2px solid transparent; transition: all 0.2s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .note-item:hover { background: linear-gradient(90deg, #151515 0%, rgba(0,0,0,0) 100%); color: var(--text); }
+  .note-item.active { background: linear-gradient(90deg, #262626 0%, rgba(0,0,0,0) 100%); border-left-color: #fafafa; color: #ffffff; font-weight: 500; }
+  main { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); position: relative; }
+  #graph-view { flex: 1; width: 100%; height: 100%; background: radial-gradient(ellipse at 50% 40%, #0d0d0d 0%, #050505 40%, #000000 80%); }
+  .reader-pane { position: absolute; top: 0; right: 0; width: 55%; height: 100%; background: linear-gradient(180deg, #0c0c0c 0%, #040404 40%, #000000 100%); border-left: 1px solid var(--border); box-shadow: -20px 0 60px rgba(0,0,0,0.9); display: flex; flex-direction: column; z-index: 20; transform: translateX(100%); transition: transform 0.3s ease; }
+  .reader-pane.open { transform: translateX(0); }
+  .content-header { padding: 18px 28px; border-bottom: 1px solid var(--border); background: linear-gradient(90deg, #111111 0%, #000000 100%); font-size: 0.75rem; letter-spacing: 0.05em; color: var(--muted); display: flex; justify-content: space-between; align-items: center; }
+  .close-btn { background: none; border: none; color: var(--muted); font-size: 1.25rem; line-height: 1; cursor: pointer; transition: color 0.2s; }
+  .close-btn:hover { color: #ffffff; }
+  .content-body { flex: 1; padding: 36px 40px; overflow-y: auto; line-height: 1.7; font-size: 0.95rem; color: #d4d4d4; }
+  .content-body pre.plain { white-space: pre-wrap; word-wrap: break-word; font-family: monospace; }
+  .content-body h1, .content-body h2, .content-body h3 { color: #ffffff; font-weight: 600; letter-spacing: -0.01em; }
+  .content-body h1 { background: linear-gradient(90deg, #ffffff 0%, #6b6b6b 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  code { background: #0a0a0a; padding: 2px 6px; border-radius: 4px; font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 0.85em; border: 1px solid var(--border); color: #e5e5e5; }
+  pre code { display: block; padding: 16px; overflow-x: auto; background: linear-gradient(180deg, #0b0b0b, #000000); }
+  a { color: #ffffff; text-decoration: none; border-bottom: 1px solid #404040; transition: border-color 0.2s; }
+  a:hover { border-bottom-color: #ffffff; }
+  blockquote { border-left: 2px solid #404040; margin: 0; padding-left: 16px; color: var(--muted); }
+  hr { border: none; height: 1px; background: linear-gradient(90deg, #2a2a2a, rgba(0,0,0,0)); }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+  th, td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+  th { background: linear-gradient(180deg, #121212, #050505); }
+  .graph-legend { position: absolute; bottom: 24px; left: 24px; background: linear-gradient(180deg, rgba(14,14,14,0.9), rgba(0,0,0,0.9)); border: 1px solid var(--border); padding: 12px 16px; border-radius: 8px; font-size: 0.75rem; letter-spacing: 0.03em; color: var(--muted); backdrop-filter: blur(6px); pointer-events: none; z-index: 5; }
+  .legend-item { display: flex; align-items: center; margin-bottom: 4px; }
+  .legend-dot { width: 8px; height: 8px; border-radius: 50%; margin-right: 10px; }
+</style>
+</head>
+<body>
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <h2>Rune Notes</h2>
+    <input type="text" class="search-box" id="search" placeholder="Search notes..." oninput="filterNotes()">
+  </div>
+  <ul class="note-list" id="noteList">
+__SIDEBAR__
+  </ul>
+</aside>
+<main>
+  <div id="graph-view"></div>
+  <div class="graph-legend">
+    <div class="legend-item"><div class="legend-dot" style="background: linear-gradient(135deg, #ffffff, #737373);"></div>Note</div>
+    <div class="legend-item"><div class="legend-dot" style="background: linear-gradient(135deg, #525252, #1a1a1a);"></div>Link</div>
+    <div style="margin-top: 6px; color: #525252;">Click a node to read it</div>
+  </div>
+  <div class="reader-pane" id="readerPane">
+    <div class="content-header">
+      <span id="contentHeader">Viewing: </span>
+      <button class="close-btn" onclick="closeReader()">×</button>
+    </div>
+    <div class="content-body" id="contentBody"></div>
+  </div>
+</main>
+<script>
+  const rawNodes = __NODES__;
+  const rawEdges = __EDGES__;
+  const notesData = __NOTES__;
+
+  const nodes = new vis.DataSet(rawNodes.map(n => ({
+    id: n.id,
+    label: n.label,
+    title: n.title,
+    group: 'notes',
+    shape: 'box',
+    margin: 10,
+    borderWidth: 2,
+    shapeProperties: { borderRadius: 6 },
+    color: {
+      background: '#000000',
+      border: '#404040',
+      highlight: { background: '#171717', border: '#fafafa' },
+      hover: { background: '#0f0f0f', border: '#8a8a8a' }
+    },
+    font: { color: '#e5e5e5', size: 13, face: 'Inter, -apple-system, Segoe UI, Roboto, sans-serif' }
+  })));
+  const edges = new vis.DataSet(rawEdges.map(e => ({
+    from: e.from,
+    to: e.to,
+    color: { color: '#2a2a2a', highlight: '#fafafa', hover: '#737373' },
+    width: 1,
+    arrows: { to: { enabled: true, scaleFactor: 0.4 } }
+  })));
+
+  const container = document.getElementById('graph-view');
+  const options = {
+    physics: {
+      barnesHut: {
+        gravitationalConstant: -3000,
+        centralGravity: 0.3,
+        springLength: 120,
+        springConstant: 0.04,
+        damping: 0.09
+      }
+    },
+    interaction: { hover: true, tooltipDelay: 200 },
+    nodes: { shadow: false },
+    edges: { shadow: false, smooth: { type: 'cubicBezier', roundness: 0.2 } }
+  };
+  const network = new vis.Network(container, { nodes: nodes, edges: edges }, options);
+
+  network.on('click', function (params) {
+    if (params.nodes.length > 0) {
+      selectNote(params.nodes[0]);
+    }
+  });
+
+  function openNoteIndex(idx) {
+    selectNote('note_' + idx);
+    network.selectNodes(['note_' + idx]);
+  }
+
+  function selectNote(id) {
+    const note = notesData[id];
+    if (!note) return;
+
+    document.querySelectorAll('.note-item').forEach(i => i.classList.remove('active'));
+    for (const item of document.querySelectorAll('.note-item')) {
+      if (item.getAttribute('data-path') === note.path) {
+        item.classList.add('active');
+        break;
+      }
+    }
+
+    document.getElementById('contentHeader').textContent = 'Viewing: ' + note.path;
+    const body = document.getElementById('contentBody');
+
+    try {
+      if (window.marked) {
+        // Strip YAML frontmatter so it doesn't render as a stray heading/hr.
+        const md = note.content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
+        const parse = marked.parse ? marked.parse.bind(marked) : marked;
+        let htmlContent = parse(md);
+        htmlContent = htmlContent.replace(/\[\[([^\]\|]+)(?:\|([^\]]+))?\]\]/g, function (m, p1, p2) {
+          const label = (p2 || p1).trim();
+          return '<a href="#" class="wikilink" data-target="' + encodeURIComponent(p1.trim()) + '">' + label + '</a>';
+        });
+        body.innerHTML = htmlContent;
+      } else {
+        const pre = document.createElement('pre');
+        pre.className = 'plain';
+        pre.textContent = note.content;
+        body.innerHTML = '';
+        body.appendChild(pre);
+      }
+    } catch (err) {
+      console.error('Failed to render note', err);
+      const pre = document.createElement('pre');
+      pre.className = 'plain';
+      pre.textContent = note.content;
+      body.innerHTML = '';
+      body.appendChild(pre);
+    }
+
+    body.scrollTop = 0;
+    document.getElementById('readerPane').classList.add('open');
+  }
+
+  document.getElementById('contentBody').addEventListener('click', function (e) {
+    const a = e.target.closest('a.wikilink');
+    if (!a) return;
+    e.preventDefault();
+    openNoteByPath(decodeURIComponent(a.getAttribute('data-target')));
+  });
+
+  function closeReader() {
+    document.getElementById('readerPane').classList.remove('open');
+    document.querySelectorAll('.note-item').forEach(i => i.classList.remove('active'));
+    network.unselectAll();
+  }
+
+  function openNoteByPath(path) {
+    for (const [id, note] of Object.entries(notesData)) {
+      if (note.path === path || note.path.endsWith('/' + path) || path.endsWith('/' + note.path)) {
+        selectNote(id);
+        network.selectNodes([id]);
+        return;
+      }
+    }
+  }
+
+  function filterNotes() {
+    const q = document.getElementById('search').value.toLowerCase();
+    document.querySelectorAll('.note-item').forEach(item => {
+      const text = item.textContent.toLowerCase();
+      item.style.display = text.includes(q) ? 'block' : 'none';
+    });
+  }
+</script>
+</body>
+</html>
+"###;
+
+/// Serialize JSON so it is safe to embed inside a <script> block.
+fn json_for_script(value: &serde_json::Value) -> String {
+    serde_json::to_string(value)
+        .unwrap_or_else(|_| "null".to_string())
+        .replace("</", "<\\/")
+        .replace("<!--", "<\\!--")
 }
 
 pub struct RenderRuneNotesTool;
@@ -219,7 +473,8 @@ impl AgentTool for RenderRuneNotesTool {
     }
 
     async fn execute(&self, args: serde_json::Value) -> String {
-        let output_file = args.get("output_path")
+        let output_file = args
+            .get("output_path")
             .and_then(|v| v.as_str())
             .unwrap_or("rune_notes.html");
 
@@ -228,249 +483,93 @@ impl AgentTool for RenderRuneNotesTool {
             return "No rune-notes directory found (.rune/notes/ is empty).".to_string();
         }
 
-        // Collect all markdown notes
-        let mut notes: Vec<(String, String)> = Vec::new(); // (relative_path, content)
-        let mut stack = vec![dir.clone()];
-        while let Some(path) = stack.pop() {
-            if let Ok(entries) = fs::read_dir(path) {
-                for entry in entries.flatten() {
-                    let p = entry.path();
-                    if p.is_dir() {
-                        stack.push(p);
-                    } else if p.extension().map_or(false, |ext| ext == "md" || ext == "markdown") {
-                        if let Ok(rel) = p.strip_prefix(&dir) {
-                            let rel_str = rel.to_string_lossy().replace('\\', "/");
-                            if let Ok(content) = fs::read_to_string(&p) {
-                                notes.push((rel_str, content));
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        // Collect all markdown notes as (relative_path, content), already sorted by path.
+        let notes: Vec<(String, String)> = collect_note_files(&dir)
+            .into_iter()
+            .filter_map(|(rel, abs)| fs::read_to_string(&abs).ok().map(|c| (rel, c)))
+            .collect();
 
         if notes.is_empty() {
             return "No rune-notes found to render.".to_string();
         }
 
-        notes.sort_by(|a, b| a.0.cmp(&b.0));
-
-        // Generate standalone HTML with Vis.network graph & interactive link lines
-        let mut html = String::new();
-        html.push_str("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n");
-        html.push_str("<meta charset=\"UTF-8\">\n");
-        html.push_str("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n");
-        html.push_str("<title>Rune Notes Knowledge Graph</title>\n");
-        html.push_str("<script type=\"text/javascript\" src=\"https://unpkg.com/vis-network/standalone/umd/vis-network.min.js\"></script>\n");
-        html.push_str("<script src=\"https://cdn.jsdelivr.net/npm/marked/marked.js\"></script>\n");
-        html.push_str("<style>\n");
-        html.push_str("  :root { --bg: #0f172a; --panel: #1e293b; --border: #334155; --text: #f8fafc; --muted: #94a3b8; --accent: #38bdf8; --accent-hover: #0ea5e9; }\n");
-        html.push_str("  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 0; display: flex; height: 100vh; overflow: hidden; }\n");
-        html.push_str("  sidebar { width: 340px; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; z-index: 10; }\n");
-        html.push_str("  .sidebar-header { padding: 20px; border-bottom: 1px solid var(--border); }\n");
-        html.push_str("  .sidebar-header h2 { margin: 0; font-size: 1.25rem; color: var(--accent); }\n");
-        html.push_str("  .search-box { width: 100%; padding: 8px 12px; margin-top: 12px; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 6px; box-sizing: border-box; }\n");
-        html.push_str("  .note-list { overflow-y: auto; flex: 1; padding: 12px; list-style: none; margin: 0; }\n");
-        html.push_str("  .note-item { padding: 10px 14px; margin-bottom: 4px; border-radius: 6px; cursor: pointer; color: var(--muted); font-size: 0.9rem; transition: all 0.2s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }\n");
-        html.push_str("  .note-item:hover { background: rgba(56, 189, 248, 0.1); color: var(--text); }\n");
-        html.push_str("  .note-item.active { background: var(--accent); color: var(--bg); font-weight: 600; }\n");
-        html.push_str("  main { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); position: relative; }\n");
-        html.push_str("  #graph-view { flex: 1; width: 100%; height: 100%; background: var(--bg); }\n");
-        html.push_str("  .reader-pane { position: absolute; top: 0; right: 0; width: 55%; height: 100%; background: var(--panel); border-left: 1px solid var(--border); box-shadow: -5px 0 25px rgba(0,0,0,0.5); display: flex; flex-direction: column; z-index: 20; transform: translateX(100%); transition: transform 0.3s ease; }\n");
-        html.push_str("  .reader-pane.open { transform: translateX(0); }\n");
-        html.push_str("  .content-header { padding: 16px 24px; border-bottom: 1px solid var(--border); background: var(--panel); font-size: 0.9rem; color: var(--muted); display: flex; justify-content: space-between; align-items: center; }\n");
-        html.push_str("  .close-btn { background: none; border: none; color: var(--muted); font-size: 1.25rem; cursor: pointer; }\n");
-        html.push_str("  .close-btn:hover { color: var(--text); }\n");
-        html.push_str("  .content-body { flex: 1; padding: 32px; overflow-y: auto; line-height: 1.6; color: var(--text); }\n");
-        html.push_str("  h1, h2, h3 { color: var(--accent); }\n");
-        html.push_str("  code { background: var(--bg); padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em; border: 1px solid var(--border); }\n");
-        html.push_str("  pre code { display: block; padding: 16px; overflow-x: auto; border: 1px solid var(--border); }\n");
-        html.push_str("  a { color: var(--accent); text-decoration: none; }\n");
-        html.push_str("  a:hover { text-decoration: underline; }\n");
-        html.push_str("  blockquote { border-left: 4px solid var(--accent); margin: 0; padding-left: 16px; color: var(--muted); }\n");
-        html.push_str("  table { width: 100%; border-collapse: collapse; margin: 16px 0; }\n");
-        html.push_str("  th, td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }\n");
-        html.push_str("  th { background: var(--panel); }\n");
-        html.push_str("  .graph-legend { position: absolute; bottom: 20px; left: 20px; background: rgba(30, 41, 59, 0.9); border: 1px solid var(--border); padding: 12px 16px; border-radius: 8px; font-size: 0.85rem; color: var(--muted); backdrop-filter: blur(4px); pointer-events: none; z-index: 5; }\n");
-        html.push_str("  .legend-item { display: flex; align-items: center; margin-bottom: 4px; }\n");
-        html.push_str("  .legend-dot { width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; }\n");
-        html.push_str("</style>\n");
-        html.push_str("</head>\n<body>\n");
-
-        // Sidebar
-        html.push_str("<sidebar>\n");
-        html.push_str("  <div class=\"sidebar-header\">\n");
-        html.push_str("    <h2>⚡ Rune Notes Graph</h2>\n");
-        html.push_str("    <input type=\"text\" class=\"search-box\" id=\"search\" placeholder=\"Search notes...\" oninput=\"filterNotes()\">\n");
-        html.push_str("  </div>\n");
-        html.push_str("  <ul class=\"note-list\" id=\"noteList\">\n");
+        // Sidebar list items (HTML-escaped).
+        let mut sidebar = String::new();
         for (idx, (path, _)) in notes.iter().enumerate() {
-            html.push_str(&format!(
-                "    <li class=\"note-item\" onclick=\"openNoteIndex({})\" title=\"{}\">{}</li>\n",
-                idx,
-                path,
-                path
+            let esc = html_escape(path);
+            sidebar.push_str(&format!(
+                "    <li class=\"note-item\" onclick=\"openNoteIndex({})\" data-path=\"{}\" title=\"{}\">{}</li>\n",
+                idx, esc, esc, esc
             ));
         }
-        html.push_str("  </ul>\n");
-        html.push_str("</sidebar>\n");
 
-        // Main Graph Area & Reader Pane
-        html.push_str("<main>\n");
-        html.push_str("  <div id=\"graph-view\"></div>\n");
-        html.push_str("  <div class=\"graph-legend\">\n");
-        html.push_str("    <div class=\"legend-item\"><div class=\"legend-dot\" style=\"background: #38bdf8;\"></div>Rune Note Node</div>\n");
-        html.push_str("    <div class=\"legend-item\"><div class=\"legend-dot\" style=\"background: #0ea5e9;\"></div>Connected Link Line</div>\n");
-        html.push_str("    <div style=\"margin-top: 6px; font-size: 0.75rem; color: #64748b;\">Tip: Click any node to read content & highlight links</div>\n");
-        html.push_str("  </div>\n");
-        html.push_str("  <div class=\"reader-pane\" id=\"readerPane\">\n");
-        html.push_str("    <div class=\"content-header\">\n");
-        html.push_str("      <span id=\"contentHeader\">Viewing: </span>\n");
-        html.push_str("      <button class=\"close-btn\" onclick=\"closeReader()\">×</button>\n");
-        html.push_str("    </div>\n");
-        html.push_str("    <div class=\"content-body\" id=\"contentBody\"></div>\n");
-        html.push_str("  </div>\n");
-        html.push_str("</main>\n");
-
-        // Embedded JSON data and Vis.network setup
-        html.push_str("<script>\n");
-        html.push_str("  const notesData = {\n");
+        // Notes data, nodes, and edges, all built as JSON.
+        let mut notes_map = serde_json::Map::new();
+        let mut nodes_arr = Vec::new();
         for (idx, (path, content)) in notes.iter().enumerate() {
-            let escaped = content
-                .replace('\\', "\\\\")
-                .replace('`', "\\`")
-                .replace('$', "\\$");
-            html.push_str(&format!("    \"note_{}\": {{ id: \"note_{}\", path: \"{}\", content: `{}` }},\n", idx, idx, path, escaped));
-        }
-        html.push_str("  };\n");
-
-        html.push_str("  // Build nodes and edges for Vis.network\n");
-        html.push_str("  const nodesArray = [];\n");
-        html.push_str("  const edgesArray = [];\n");
-        html.push_str("  const pathMap = {};\n");
-
-        for (idx, (path, _)) in notes.iter().enumerate() {
-            html.push_str(&format!("  pathMap[\"{}\"] = \"note_{}\";\n", path, idx));
-            let label = path.split('/').last().unwrap_or(path);
-            html.push_str(&format!(
-                "  nodesArray.push({{ id: \"note_{}\", label: \"{}\", title: \"{}\", group: \"notes\", color: {{ background: '#1e293b', border: '#38bdf8', highlight: {{ background: '#38bdf8', border: '#0ea5e9' }} }}, font: {{ color: '#f8fafc', size: 14 }}, shape: 'box', margin: 10, borderWidth: 2, borderRadius: 6 }});\n",
-                idx, label, path
-            ));
+            let id = format!("note_{}", idx);
+            notes_map.insert(
+                id.clone(),
+                json!({ "id": id, "path": path, "content": content }),
+            );
+            let label = path.rsplit('/').next().unwrap_or(path);
+            nodes_arr.push(json!({ "id": id, "label": label, "title": path }));
         }
 
-        // Parse [[links]] manually in Rust without external regex crate
+        // Parse [[links]] without an external regex crate.
+        let mut seen: HashSet<(usize, usize)> = HashSet::new();
+        let mut edges_arr = Vec::new();
         for (idx, (_, content)) in notes.iter().enumerate() {
             let mut search_idx = 0;
             while let Some(start) = content[search_idx..].find("[[") {
                 let abs_start = search_idx + start + 2;
-                if let Some(end) = content[abs_start..].find("]]") {
-                    let abs_end = abs_start + end;
-                    let link_content = &content[abs_start..abs_end];
-                    let target_raw = if let Some(pipe) = link_content.find('|') {
-                        link_content[..pipe].trim()
-                    } else {
-                        link_content.trim()
-                    };
+                let Some(end) = content[abs_start..].find("]]") else {
+                    break;
+                };
+                let abs_end = abs_start + end;
+                let link_content = &content[abs_start..abs_end];
+                let target_raw = match link_content.find('|') {
+                    Some(pipe) => link_content[..pipe].trim(),
+                    None => link_content.trim(),
+                };
 
+                if !target_raw.is_empty() {
                     for (t_idx, (t_path, _)) in notes.iter().enumerate() {
-                        if t_path == target_raw || t_path.ends_with(&format!("/{}", target_raw)) || target_raw.ends_with(&format!("/{}", t_path)) {
-                            if idx != t_idx {
-                                html.push_str(&format!(
-                                    "  edgesArray.push({{ from: \"note_{}\", to: \"note_{}\", color: {{ color: '#334155', highlight: '#38bdf8' }}, width: 2, arrows: {{ to: {{ enabled: true, scaleFactor: 0.5 }} }} }});\n",
-                                    idx, t_idx
-                                ));
-                            }
+                        let matches = t_path == target_raw
+                            || t_path.ends_with(&format!("/{}", target_raw))
+                            || target_raw.ends_with(&format!("/{}", t_path))
+                            // allow links written without the .md extension
+                            || t_path == &format!("{}.md", target_raw)
+                            || t_path.ends_with(&format!("/{}.md", target_raw));
+                        if matches && idx != t_idx && seen.insert((idx, t_idx)) {
+                            edges_arr.push(json!({
+                                "from": format!("note_{}", idx),
+                                "to": format!("note_{}", t_idx)
+                            }));
                         }
                     }
-                    search_idx = abs_end + 2;
-                } else {
-                    break;
                 }
+                search_idx = abs_end + 2;
             }
         }
 
-        html.push_str("  const nodes = new vis.DataSet(nodesArray);\n");
-        html.push_str("  const edges = new vis.DataSet(edgesArray);\n");
-        html.push_str("  const container = document.getElementById('graph-view');\n");
-        html.push_str("  const data = { nodes: nodes, edges: edges };\n");
-        html.push_str("  const options = {\n");
-        html.push_str("    physics: {\n");
-        html.push_str("      barnesHut: {\n");
-        html.push_str("        gravitationalConstant: -3000,\n");
-        html.push_str("        centralGravity: 0.3,\n");
-        html.push_str("        springLength: 120,\n");
-        html.push_str("        springConstant: 0.04,\n");
-        html.push_str("        damping: 0.09\n");
-        html.push_str("      }\n");
-        html.push_str("    },\n");
-        html.push_str("    interaction: { hover: true, tooltipDelay: 200 },\n");
-        html.push_str("    nodes: { shadow: true },\n");
-        html.push_str("    edges: { shadow: true, smooth: { type: 'cubicBezier', roundness: 0.2 } }\n");
-        html.push_str("  };\n");
-        html.push_str("  const network = new vis.Network(container, data, options);\n");
+        let nodes_json = json_for_script(&serde_json::Value::Array(nodes_arr));
+        let edges_json = json_for_script(&serde_json::Value::Array(edges_arr));
+        let notes_json = json_for_script(&serde_json::Value::Object(notes_map));
 
-        html.push_str("  network.on(\"click\", function(params) {\n");
-        html.push_str("    if (params.nodes.length > 0) {\n");
-        html.push_str("      const nodeId = params.nodes[0];\n");
-        html.push_str("      selectNote(nodeId);\n");
-        html.push_str("    }\n");
-        html.push_str("  });\n");
-
-        html.push_str("  function openNoteIndex(idx) {\n");
-        html.push_str("    selectNote('note_' + idx);\n");
-        html.push_str("    network.selectNodes(['note_' + idx]);\n");
-        html.push_str("  }\n");
-
-        html.push_str("  function selectNote(id) {\n");
-        html.push_str("    document.querySelectorAll('.note-item').forEach(i => i.classList.remove('active'));\n");
-        html.push_str("    for (const item of document.querySelectorAll('.note-item')) {\n");
-        html.push_str("      if (item.getAttribute('title') === notesData[id].path) {\n");
-        html.push_str("        item.classList.add('active');\n");
-        html.push_str("        break;\n");
-        html.push_str("      }\n");
-        html.push_str("    }\n");
-        html.push_str("    document.getElementById('contentHeader').innerText = 'Viewing: ' + notesData[id].path;\n");
-        html.push_str("    const note = notesData[id];\n");
-        html.push_str("    if (note) {\n");
-        html.push_str("      let htmlContent = marked.parse(note.content);\n");
-        html.push_str("      htmlContent = htmlContent.replace(/\\[\\[([^\\]\\|]+)(?:\\|([^\\]]+))?\\]\\]/g, (match, p1, p2) => {\n");
-        html.push_str("        const title = p2 || p1;\n");
-        html.push_str("        return `<a href=\"#\" onclick=\"openNoteByPath('${p1.trim()}'); return false;\">${title}</a>`;\n");
-        html.push_str("      });\n");
-        html.push_str("      document.getElementById('contentBody').innerHTML = htmlContent;\n");
-        html.push_str("      document.getElementById('readerPane').classList.add('open');\n");
-        html.push_str("    }\n");
-        html.push_str("  }\n");
-
-        html.push_str("  function closeReader() {\n");
-        html.push_str("    document.getElementById('readerPane').classList.remove('open');\n");
-        html.push_str("    document.querySelectorAll('.note-item').forEach(i => i.classList.remove('active'));\n");
-        html.push_str("    network.unselectAll();\n");
-        html.push_str("  }\n");
-
-        html.push_str("  function openNoteByPath(path) {\n");
-        html.push_str("    for (const [id, note] of Object.entries(notesData)) {\n");
-        html.push_str("      if (note.path === path || note.path.endsWith('/' + path) || path.endsWith('/' + note.path)) {\n");
-        html.push_str("        selectNote(id);\n");
-        html.push_str("        network.selectNodes([id]);\n");
-        html.push_str("        return;\n");
-        html.push_str("      }\n");
-        html.push_str("    }\n");
-        html.push_str("  }\n");
-
-        html.push_str("  function filterNotes() {\n");
-        html.push_str("    const q = document.getElementById('search').value.toLowerCase();\n");
-        html.push_str("    document.querySelectorAll('.note-item').forEach(item => {\n");
-        html.push_str("      const text = item.innerText.toLowerCase();\n");
-        html.push_str("      item.style.display = text.includes(q) ? 'block' : 'none';\n");
-        html.push_str("    });\n");
-        html.push_str("  }\n");
-
-        html.push_str("</script>\n");
-        html.push_str("</body>\n</html>\n");
+        // Replace the notes data LAST so note content can never be touched by other replacements.
+        let html = GRAPH_TEMPLATE
+            .replace("__SIDEBAR__", &sidebar)
+            .replace("__NODES__", &nodes_json)
+            .replace("__EDGES__", &edges_json)
+            .replace("__NOTES__", &notes_json);
 
         match fs::write(output_file, html) {
-            Ok(()) => format!("Successfully rendered {} rune-notes into an interactive Vis.network knowledge graph with connection lines at '{}'.", notes.len(), output_file),
+            Ok(()) => format!(
+                "Successfully rendered {} rune-notes into an interactive Vis.network knowledge graph with connection lines at '{}'.",
+                notes.len(),
+                output_file
+            ),
             Err(e) => format!("Error writing HTML output to '{}': {}", output_file, e),
         }
     }
