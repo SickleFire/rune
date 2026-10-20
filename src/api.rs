@@ -1179,15 +1179,18 @@ impl Agent {
     }
 
     pub async fn run_with_mode(&mut self, raw_prompt: &str, auto_approve: bool, plan_mode: bool) {
-        // Auto-truncate history / hierarchical context sliding window if character/token count gets too large (> 35,000 chars)
+        // Auto-truncate history / hierarchical context sliding window if character/token count gets too large (> 20,000 chars)
         let (_, chars) = self.get_history_stats();
-        if chars > 35000 {
+        if chars > 20000 {
             println!("[Rune Hierarchical Context: Conversation history reached {} chars. Applying sliding-window summarization & selective pruning]", chars);
-            self.truncate_history(10);
+            self.truncate_history(8);
         }
 
         let processed = self.resolve_mentions(raw_prompt).await;
         self.history.push(CanonicalMessage::User(processed));
+
+        let mut tool_steps = 0;
+        let max_tool_steps = 15;
 
         loop {
             let streamed_text = Arc::new(Mutex::new(String::new()));
@@ -1231,6 +1234,15 @@ impl Agent {
 
             if tool_calls.is_empty() {
                 println!();
+                break;
+            }
+
+            tool_steps += 1;
+            if tool_steps > max_tool_steps {
+                println!("\n{}", "[Rune Safeguard: Maximum tool iteration limit (15) reached. Forcing response synthesis.]".yellow().bold());
+                self.history.push(CanonicalMessage::User(
+                    "[System Notice: You have reached the maximum allowed tool iterations for this prompt. Please synthesize your final answer now based on the information gathered so far without making further tool calls.]".to_string()
+                ));
                 break;
             }
 
@@ -1350,6 +1362,7 @@ impl Agent {
 
                 let futures = read_only.into_iter().map(|tc| {
                     let ro_dynamic = ro_dynamic.clone();
+                    
                     println!("\n[Executing read-only tool concurrently: {}]", tc.name);
                     async move {
                         let output = if let Some(tool) = ro_dynamic.get(&tc.name) {
