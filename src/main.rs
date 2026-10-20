@@ -1109,6 +1109,16 @@ mysql_url = "{new_mysql_url}"
                     continue;
                 }
 
+                if prompt.eq_ignore_ascii_case("/render") || prompt.starts_with("/render ") {
+                    use rune_code::tools::AgentTool;
+                    let parts: Vec<&str> = prompt.split_whitespace().collect();
+                    let output_path = if parts.len() > 1 { parts[1] } else { "rune_notes.html" };
+                    let tool = rune_code::notes_tools::RenderRuneNotesTool;
+                    let result: String = tool.execute(serde_json::json!({ "output_path": output_path })).await;
+                    println!("{}", result.green());
+                    continue;
+                }
+
                 if prompt.eq_ignore_ascii_case("/init") || prompt.starts_with("/init ") {
                     let target_path = std::path::Path::new("rune.toml");
                     if target_path.exists() {
@@ -1329,6 +1339,10 @@ coder_model = "gpt-5.6-luna"
                     println!(
                         "  - {:<22} : Switch or view LLM provider (/provider [gemini|openai|groq|openrouter] [model])",
                         "/provider".green()
+                    );
+                    println!(
+                        "  - {:<22} : Render all rune-notes into an HTML knowledge graph",
+                        "/render [file]".green()
                     );
                     println!(
                         "  - {:<22} : Interactively setup or generate rune.toml configuration",
