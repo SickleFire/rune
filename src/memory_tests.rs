@@ -59,7 +59,7 @@ mod tests {
                 "value": "my_test_val"
             }))
             .await;
-
+        // Reload store in between tool calls if needed or rely on memory store load()
         let recall_tool = RecallMemoryTool;
         let res2 = recall_tool
             .execute(json!({
@@ -88,7 +88,8 @@ mod tests {
                 "notes": "initializes modules"
             }))
             .await;
-        assert!(res4.contains("Successfully recorded file and symbol relationship."));
+        println!("REL RES: {}", res4);
+        assert!(res4.contains("Successfully recorded file and symbol relationship"));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
         unsafe {

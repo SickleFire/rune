@@ -7,6 +7,7 @@ pub mod godot_tools;
 pub mod memory;
 pub mod memory_tests;
 pub mod memory_tools;
+pub mod notes_tools;
 pub mod mysql_tools;
 pub mod tools;
 pub mod unity_tools;

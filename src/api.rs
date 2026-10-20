@@ -1070,7 +1070,8 @@ impl Agent {
             - **Token-Efficient Reading Workflow**: When inspecting large files, use `search_symbol` first to locate target line numbers, then call `read_file` with `start_line` and `end_line` to fetch only relevant lines.\n\
             - Use `read_file`, `list_files`, `write_file`, `patch_file`, `execute_commands`, and `execute_batch` as needed to inspect and modify code.\n\
             - Prefer `patch_file` over `write_file` for surgical code edits using search and replace blocks.\n\
-            - Be concise, precise, and proactive."
+            - Be concise, precise, and proactive.\n\
+            - **Avoid Endless Tool Loops**: Do not perform excessive read-only tool calls without writing or patching code. Take action, edit files, and synthesize answers promptly to prevent rate limits."
         );
 
         self.history.push(CanonicalMessage::User(format!(
@@ -1190,7 +1191,7 @@ impl Agent {
         self.history.push(CanonicalMessage::User(processed));
 
         let mut tool_steps = 0;
-        let max_tool_steps = 15;
+        let max_tool_steps = 50;
 
         loop {
             let streamed_text = Arc::new(Mutex::new(String::new()));
@@ -1239,10 +1240,26 @@ impl Agent {
 
             tool_steps += 1;
             if tool_steps > max_tool_steps {
-                println!("\n{}", "[Rune Safeguard: Maximum tool iteration limit (15) reached. Forcing response synthesis.]".yellow().bold());
+                println!("\n{}", "[Rune Safeguard: Maximum tool iteration limit (50) reached. Forcing response synthesis.]".yellow().bold());
                 self.history.push(CanonicalMessage::User(
                     "[System Notice: You have reached the maximum allowed tool iterations for this prompt. Please synthesize your final answer now based on the information gathered so far without making further tool calls.]".to_string()
                 ));
+                
+                // Immediately invoke provider one final time to let the model synthesize its answer!
+                let streamed_text = Arc::new(Mutex::new(String::new()));
+                let streamed_text_for_callback = Arc::clone(&streamed_text);
+                let _ = self
+                    .provider
+                    .complete(&self.history, &self.tools, &self.model, &|text: String| {
+                        print!("{text}");
+                        let _ = std::io::stdout().flush();
+                        streamed_text_for_callback
+                            .lock()
+                            .expect("streamed response lock poisoned")
+                            .push_str(&text);
+                    })
+                    .await;
+                println!();
                 break;
             }
 

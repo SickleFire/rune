@@ -335,7 +335,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         || env::var("MYSQL_URL").map_or(false, |s| !s.is_empty());
     let enable_docker = args.contains(&"--docker".to_string());
 
-    // Always enable core persistent memory and session memory tools
+    // Always enable core persistent memory, notes, and session memory tools
     orchestrator = orchestrator
         .with_tool_on_all(std::sync::Arc::new(
             rune_code::memory_tools::RememberPreferenceTool,
@@ -346,6 +346,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with_tool_on_all(std::sync::Arc::new(rune_code::memory_tools::RecordFixTool))
         .with_tool_on_all(std::sync::Arc::new(
             rune_code::memory_tools::RecordFileRelationTool,
+        ))
+        .with_tool_on_all(std::sync::Arc::new(
+            rune_code::notes_tools::ListRuneNotesTool,
+        ))
+        .with_tool_on_all(std::sync::Arc::new(
+            rune_code::notes_tools::ReadRuneNoteTool,
+        ))
+        .with_tool_on_all(std::sync::Arc::new(
+            rune_code::notes_tools::UpsertRuneNoteTool,
         ));
 
     if enable_unity_lite {
