@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use tokio::task;
 
 const MAX_PROJECT_MAP_CHARS: usize = 12_000;
+const MAX_TOOL_RESULT_CHARS: usize = 8_000;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum CanonicalMessage {
@@ -1008,9 +1009,11 @@ impl Agent {
             .history
             .iter()
             .map(|m| match m {
-                CanonicalMessage::User(t) => t.len(),
-                CanonicalMessage::Assistant { text, .. } => text.as_deref().map_or(0, |t| t.len()),
-                CanonicalMessage::ToolResult(r) => r.content.len(),
+                CanonicalMessage::User(t) => t.chars().count(),
+                CanonicalMessage::Assistant { text, .. } => {
+                    text.as_deref().map_or(0, |t| t.chars().count())
+                }
+                CanonicalMessage::ToolResult(r) => r.content.chars().count(),
             })
             .sum::<usize>()
             + self
@@ -1021,7 +1024,7 @@ impl Agent {
                     _ => None,
                 })
                 .flatten()
-                .map(|call| call.name.len() + call.args.to_string().len())
+                .map(|call| call.name.chars().count() + call.args.to_string().chars().count())
                 .sum::<usize>();
         (count, chars)
     }
@@ -1067,7 +1070,7 @@ impl Agent {
             - When the user mentions specific files using `@filename` (e.g. `@src/api.rs`), those files are automatically loaded and injected into your prompt context.\n\
             - Use `search_code` (powered by the `cix` indexed search engine) to instantly search for functions, symbols, or patterns across the repository when you need to locate code.\n\
             - Use `search_symbol` (powered by the `cix` indexed search engine) to get symbols of a file.\n\
-            - **Token-Efficient Reading Workflow**: When inspecting large files, use `search_symbol` first to locate target line numbers, then call `read_file` with `start_line` and `end_line` to fetch only relevant lines.
+            - **Token-Efficient Reading Workflow**: When inspecting large files, use `search_symbol` first to locate target line numbers, then call `read_file` with `start_line` and `end_line` to fetch only relevant lines. Tool output is capped at 8,000 characters; use narrower line ranges or search queries to retrieve omitted content.
             - **Rune Notes Workflow**: Prioritize relevant rune notes in `.rune/notes/` before reading raw source files. Treat the notes as a directed graph: for specific tasks, use `search_notes` with targeted keywords first; for broad or unfamiliar topics, start with `read_rune_note` on `overview.md` when available. Read neighboring notes only when the current note explicitly connects to them, preferably with Wiki-style links (`[[note_path.md]]`); never read unrelated notes or scan the full store blindly. Follow links only as needed for the task.\n\
             - Use `read_file`, `list_files`, `write_file`, `patch_file`, `execute_commands`, and `execute_batch` as needed to inspect and modify code.\n\
             - Prefer `patch_file` over `write_file` for surgical code edits using search and replace blocks.\n\
@@ -1153,25 +1156,60 @@ impl Agent {
         self.initialize_system_context();
     }
 
-    /// Truncate history to keep the last `max_messages` while preserving
-    /// the initial system architecture context (messages 0 and 1).
+    /// Keep recent complete turns while preserving the initial system context.
     pub fn truncate_history(&mut self, max_messages: usize) {
-        if self.history.len() <= 2 {
+        let context_end = self
+            .history
+            .iter()
+            .position(|message| match message {
+                CanonicalMessage::User(text) => {
+                    !text.starts_with("[SYSTEM ARCHITECTURE INITIALIZATION]")
+                        && !text.starts_with("[AGENT PERSONA:")
+                }
+                _ => false,
+            })
+            .unwrap_or(self.history.len());
+
+        if context_end == self.history.len() {
             return;
         }
-        // System context is always the first 2 messages (User init + Assistant ACK)
-        let system_len = 2;
-        if self.history.len() > system_len + max_messages {
-            let start = self.history.len() - max_messages;
-            let mut pruned = Vec::with_capacity(system_len + max_messages);
-            // Retain system init context
-            pruned.extend(self.history[..system_len].iter().cloned());
-            // Retain the last `max_messages`
-            pruned.extend(self.history[start..].iter().cloned());
-            self.history = pruned;
+
+        let mut turns = Vec::new();
+        let mut turn_start = None;
+        for (index, message) in self.history.iter().enumerate().skip(context_end) {
+            let is_new_turn = matches!(
+                message,
+                CanonicalMessage::User(text) if !text.starts_with("[System Notice:")
+            );
+            if is_new_turn {
+                if let Some(start) = turn_start.replace(index) {
+                    turns.push((start, index));
+                }
+            }
+        }
+        if let Some(start) = turn_start {
+            turns.push((start, self.history.len()));
+        }
+
+        let mut retained_start = self.history.len();
+        let mut retained_messages = 0;
+        for &(start, end) in turns.iter().rev() {
+            let turn_size = end - start;
+            if retained_messages > 0 && retained_messages + turn_size > max_messages {
+                break;
+            }
+            retained_start = start;
+            retained_messages += turn_size;
+        }
+
+        if retained_start > context_end {
+            let mut compacted = Vec::with_capacity(context_end + retained_messages);
+            compacted.extend(self.history[..context_end].iter().cloned());
+            compacted.extend(self.history[retained_start..].iter().cloned());
+            let removed = self.history.len() - compacted.len();
+            self.history = compacted;
             println!(
-                "[Rune: History truncated to last {} messages (+ system context)]",
-                max_messages
+                "[Rune: Removed {removed} older messages; retained complete recent turns and system context]"
             );
         }
     }
@@ -1181,11 +1219,11 @@ impl Agent {
     }
 
     pub async fn run_with_mode(&mut self, raw_prompt: &str, auto_approve: bool, plan_mode: bool) {
-        // Auto-truncate history / hierarchical context sliding window if character/token count gets too large (> 20,000 chars)
+        // Compact history at complete-turn boundaries when it grows beyond 20,000 characters.
         let (_, chars) = self.get_history_stats();
         if chars > 20000 {
             println!(
-                "[Rune Hierarchical Context: Conversation history reached {} chars. Applying sliding-window summarization & selective pruning]",
+                "[Rune History Compaction: Conversation history reached {} characters. Keeping recent complete turns and system context]",
                 chars
             );
             self.truncate_history(8);
@@ -1349,7 +1387,8 @@ impl Agent {
                     });
 
                     let ro_results = futures_util::future::join_all(futures).await;
-                    for result in ro_results {
+                    for mut result in ro_results {
+                        truncate_tool_result(&mut result);
                         self.history.push(CanonicalMessage::ToolResult(result));
                     }
                     continue;
@@ -1461,7 +1500,8 @@ impl Agent {
                 });
             }
 
-            for result in tool_results {
+            for mut result in tool_results {
+                truncate_tool_result(&mut result);
                 self.history.push(CanonicalMessage::ToolResult(result));
             }
         }
@@ -1862,6 +1902,27 @@ fn truncate_project_map(mut project_map: String) -> String {
     project_map
 }
 
+fn truncate_tool_result(result: &mut CanonicalToolResult) {
+    let original_chars = result.content.chars().count();
+    if original_chars <= MAX_TOOL_RESULT_CHARS {
+        return;
+    }
+
+    let marker = format!(
+        "\n\n[Rune: Tool output exceeded the {MAX_TOOL_RESULT_CHARS}-character limit and was truncated. Some content is omitted. For file contents, request a narrower read_file line range. For search results, refine the query.]"
+    );
+    let content_limit = MAX_TOOL_RESULT_CHARS - marker.chars().count();
+    result.content = format!(
+        "{}{}",
+        result
+            .content
+            .chars()
+            .take(content_limit)
+            .collect::<String>(),
+        marker
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1932,6 +1993,104 @@ mod tests {
         });
 
         assert!(agent.get_history_stats().1 > initial_chars);
+    }
+
+    #[test]
+    fn tool_results_are_truncated_with_a_retrieval_hint() {
+        let mut result = CanonicalToolResult {
+            tool_call_id: "call-1".into(),
+            name: "read_file".into(),
+            content: format!("{}🌒", "a".repeat(MAX_TOOL_RESULT_CHARS)),
+        };
+
+        truncate_tool_result(&mut result);
+
+        assert!(result.content.chars().count() <= MAX_TOOL_RESULT_CHARS);
+        assert!(result.content.contains("Some content is omitted"));
+        assert!(result.content.contains("narrower read_file line range"));
+    }
+
+    #[test]
+    fn history_compaction_keeps_recent_turns_whole() {
+        let workspace = tempfile::tempdir().unwrap();
+        let provider: Arc<dyn LLMProvider> = Arc::new(InterruptedProvider);
+        let mut agent = Agent::with_provider(
+            provider,
+            "test-model".into(),
+            workspace.path().to_path_buf(),
+        );
+        agent.inject_custom_system_context("[AGENT PERSONA: test]".into());
+
+        agent.history.extend([
+            CanonicalMessage::User("older request".into()),
+            CanonicalMessage::Assistant {
+                text: None,
+                tool_calls: vec![CanonicalToolCall {
+                    id: "old-call".into(),
+                    name: "read_file".into(),
+                    args: serde_json::json!({"path": "old.txt"}),
+                    thought_signature: None,
+                }],
+            },
+            CanonicalMessage::ToolResult(CanonicalToolResult {
+                tool_call_id: "old-call".into(),
+                name: "read_file".into(),
+                content: "old result".into(),
+            }),
+            CanonicalMessage::Assistant {
+                text: Some("old answer".into()),
+                tool_calls: vec![],
+            },
+            CanonicalMessage::User("recent request".into()),
+            CanonicalMessage::Assistant {
+                text: None,
+                tool_calls: vec![CanonicalToolCall {
+                    id: "recent-call".into(),
+                    name: "read_file".into(),
+                    args: serde_json::json!({"path": "recent.txt"}),
+                    thought_signature: None,
+                }],
+            },
+            CanonicalMessage::User("[System Notice: continue this same turn]".into()),
+            CanonicalMessage::ToolResult(CanonicalToolResult {
+                tool_call_id: "recent-call".into(),
+                name: "read_file".into(),
+                content: "recent result".into(),
+            }),
+            CanonicalMessage::Assistant {
+                text: Some("recent answer".into()),
+                tool_calls: vec![],
+            },
+        ]);
+
+        agent.truncate_history(3);
+
+        assert!(matches!(
+            &agent.history[0],
+            CanonicalMessage::User(text) if text.starts_with("[AGENT PERSONA:")
+        ));
+        assert!(agent.history.iter().any(|message| matches!(
+            message,
+            CanonicalMessage::User(text) if text == "recent request"
+        )));
+        assert!(!agent.history.iter().any(|message| matches!(
+            message,
+            CanonicalMessage::User(text) if text == "older request"
+        )));
+        assert!(agent.history.iter().any(|message| matches!(
+            message,
+            CanonicalMessage::Assistant { tool_calls, .. }
+                if tool_calls.iter().any(|call| call.id == "recent-call")
+        )));
+        assert!(agent.history.iter().any(|message| matches!(
+            message,
+            CanonicalMessage::ToolResult(result) if result.tool_call_id == "recent-call"
+        )));
+        assert!(matches!(
+            agent.history.last(),
+            Some(CanonicalMessage::Assistant { text: Some(text), tool_calls })
+                if text == "recent answer" && tool_calls.is_empty()
+        ));
     }
 
     #[test]

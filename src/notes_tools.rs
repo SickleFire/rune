@@ -262,7 +262,10 @@ impl AgentTool for SearchRuneNotesTool {
             Some(q) if !q.is_empty() => q,
             _ => return "Error: 'query' parameter is required and cannot be empty.".to_string(),
         };
-        let case_sensitive = args.get("case_sensitive").and_then(|v| v.as_bool()).unwrap_or(false);
+        let case_sensitive = args
+            .get("case_sensitive")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         let dir = notes_dir();
         if !dir.exists() {
@@ -315,7 +318,11 @@ impl AgentTool for SearchRuneNotesTool {
 
         let mut output = format!("Found matching rune-notes for query '{}':\n", query);
         for (rel, path_match, lines) in results {
-            output.push_str(&format!("\n- **{}**{}", rel, if path_match { " (path match)" } else { "" }));
+            output.push_str(&format!(
+                "\n- **{}**{}",
+                rel,
+                if path_match { " (path match)" } else { "" }
+            ));
             for (line_num, line_text) in lines {
                 output.push_str(&format!("\n  - Line {}: `{}`", line_num, line_text.trim()));
             }
