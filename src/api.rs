@@ -1068,7 +1068,7 @@ impl Agent {
             - Use `search_code` (powered by the `cix` indexed search engine) to instantly search for functions, symbols, or patterns across the repository when you need to locate code.\n\
             - Use `search_symbol` (powered by the `cix` indexed search engine) to get symbols of a file.\n\
             - **Token-Efficient Reading Workflow**: When inspecting large files, use `search_symbol` first to locate target line numbers, then call `read_file` with `start_line` and `end_line` to fetch only relevant lines.
-            - **Rune Notes Workflow**: Prioritize checking and reading relevant rune notes in `.rune/notes/` via `list_rune_notes` and `read_rune_note` before reading raw source code files to obtain architectural context and historical decisions efficiently.\n\
+            - **Rune Notes Workflow**: Prioritize relevant rune notes in `.rune/notes/` before reading raw source files. Treat the notes as a directed graph: for specific tasks, use `search_notes` with targeted keywords first; for broad or unfamiliar topics, start with `read_rune_note` on `overview.md` when available. Read neighboring notes only when the current note explicitly connects to them, preferably with Wiki-style links (`[[note_path.md]]`); never read unrelated notes or scan the full store blindly. Follow links only as needed for the task.\n\
             - Use `read_file`, `list_files`, `write_file`, `patch_file`, `execute_commands`, and `execute_batch` as needed to inspect and modify code.\n\
             - Prefer `patch_file` over `write_file` for surgical code edits using search and replace blocks.\n\
             - Be concise, precise, and proactive.\n\
