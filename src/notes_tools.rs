@@ -228,6 +228,102 @@ impl AgentTool for UpsertRuneNoteTool {
     }
 }
 
+pub struct SearchRuneNotesTool;
+
+#[async_trait]
+impl AgentTool for SearchRuneNotesTool {
+    fn declaration(&self) -> FunctionDeclaration {
+        FunctionDeclaration {
+            name: "search_notes".to_string(),
+            description: "Search across all rune-notes (.rune/notes/) by query string matching file paths or content.".to_string(),
+            parameters: json!({
+                "type": "OBJECT",
+                "properties": {
+                    "query": {
+                        "type": "STRING",
+                        "description": "The search term or keyword to match against note content or paths."
+                    },
+                    "case_sensitive": {
+                        "type": "BOOLEAN",
+                        "description": "Whether the search should be case-sensitive (default: false)."
+                    }
+                },
+                "required": ["query"]
+            }),
+        }
+    }
+
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
+    async fn execute(&self, args: serde_json::Value) -> String {
+        let query = match args.get("query").and_then(|v| v.as_str()) {
+            Some(q) if !q.is_empty() => q,
+            _ => return "Error: 'query' parameter is required and cannot be empty.".to_string(),
+        };
+        let case_sensitive = args.get("case_sensitive").and_then(|v| v.as_bool()).unwrap_or(false);
+
+        let dir = notes_dir();
+        if !dir.exists() {
+            return "No rune-notes directory found (.rune/notes/ is empty).".to_string();
+        }
+
+        let note_files = collect_note_files(&dir);
+        if note_files.is_empty() {
+            return "No rune-notes (.md files) found in .rune/notes/.".to_string();
+        }
+
+        let mut results = Vec::new();
+
+        for (rel_path, full_path) in note_files {
+            let content = match fs::read_to_string(&full_path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            let path_matches = if case_sensitive {
+                rel_path.contains(query)
+            } else {
+                rel_path.to_lowercase().contains(&query.to_lowercase())
+            };
+
+            let mut matching_lines = Vec::new();
+            for (idx, line) in content.lines().enumerate() {
+                let line_matches = if case_sensitive {
+                    line.contains(query)
+                } else {
+                    line.to_lowercase().contains(&query.to_lowercase())
+                };
+
+                if line_matches {
+                    matching_lines.push((idx + 1, line.to_string()));
+                    if matching_lines.len() >= 5 {
+                        break; // limit matching lines per file for conciseness
+                    }
+                }
+            }
+
+            if path_matches || !matching_lines.is_empty() {
+                results.push((rel_path, path_matches, matching_lines));
+            }
+        }
+
+        if results.is_empty() {
+            return format!("No rune-notes found matching query '{}'.", query);
+        }
+
+        let mut output = format!("Found matching rune-notes for query '{}':\n", query);
+        for (rel, path_match, lines) in results {
+            output.push_str(&format!("\n- **{}**{}", rel, if path_match { " (path match)" } else { "" }));
+            for (line_num, line_text) in lines {
+                output.push_str(&format!("\n  - Line {}: `{}`", line_num, line_text.trim()));
+            }
+        }
+        output
+    }
+}
+
 const GRAPH_TEMPLATE: &str = r###"<!DOCTYPE html>
 <html lang="en">
 <head>
