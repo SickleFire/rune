@@ -1,85 +1,118 @@
 #[cfg(test)]
 mod tests {
     use crate::memory::MemoryStore;
-    use crate::memory_tools::{
-        RecallMemoryTool, RecordFileRelationTool, RecordFixTool, RememberPreferenceTool,
-    };
+    use crate::memory_tools::{RecallMemoryTool, RecordFileRelationTool, RecordFixTool};
     use crate::tools::AgentTool;
     use serde_json::json;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{Mutex, MutexGuard};
 
-    #[tokio::test]
-    async fn test_memory_store_lifecycle() {
-        let temp_dir = std::env::temp_dir().join(format!("rune_test_{}", uuid_or_random()));
-        let _ = std::fs::create_dir_all(&temp_dir);
-        let test_path = temp_dir.join("memory.json");
-        unsafe {
-            std::env::set_var("RUNE_MEMORY_PATH", &test_path);
+    // RUNE_MEMORY_PATH is process-global, and cargo runs tests in parallel.
+    // Every test that touches it must hold this lock for its whole duration.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    /// Takes the env lock, points RUNE_MEMORY_PATH at a fresh temp dir, and
+    /// restores everything on drop (even if the test panics).
+    struct TestEnv {
+        dir: PathBuf,
+        _lock: MutexGuard<'static, ()>,
+    }
+
+    impl TestEnv {
+        fn new() -> Self {
+            // Recover from poisoning so one failed test doesn't fail the others.
+            let lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let dir = std::env::temp_dir().join(format!(
+                "rune_test_{}_{}_{}",
+                std::process::id(),
+                COUNTER.fetch_add(1, Ordering::SeqCst),
+                nanos
+            ));
+            std::fs::create_dir_all(&dir).expect("failed to create temp dir");
+
+            unsafe {
+                std::env::set_var("RUNE_MEMORY_PATH", dir.join("memory.json"));
+            }
+
+            TestEnv { dir, _lock: lock }
         }
+    }
+
+    impl Drop for TestEnv {
+        fn drop(&mut self) {
+            unsafe {
+                std::env::remove_var("RUNE_MEMORY_PATH");
+            }
+            let _ = std::fs::remove_dir_all(&self.dir);
+            // Fields drop after this, so the lock is released only once the env is clean.
+        }
+    }
+
+    #[test]
+    fn test_memory_store_lifecycle() {
+        let _env = TestEnv::new();
 
         let mut store = MemoryStore::default();
-        let _ = store.set_preference("editor", "neovim");
+
+        store.set_preference("editor", "neovim").unwrap();
         assert_eq!(store.get_preference("editor").unwrap(), "neovim");
 
-        let _ = store.add_fix("lifetime error in async trait", "use BoxFuture and Pin");
+        store
+            .add_fix("lifetime error in async trait", "use BoxFuture and Pin")
+            .unwrap();
         let fixes = store.search_fixes("lifetime error");
         assert_eq!(fixes.len(), 1);
         assert_eq!(fixes[0].solution, "use BoxFuture and Pin");
 
-        let _ = store.add_file_relation(
-            "src/api.rs",
-            "send_request",
-            "calls",
-            "src/tools.rs",
-            "executes tool",
-        );
-
+        store
+            .add_file_relation(
+                "src/api.rs",
+                "send_request",
+                "calls",
+                "src/tools.rs",
+                "executes tool",
+            )
+            .unwrap();
         let rels = store.query_relations("send_request");
         assert_eq!(rels.len(), 1);
         assert_eq!(rels[0].target_file, "src/tools.rs");
-
-        let _ = std::fs::remove_dir_all(&temp_dir);
-        unsafe {
-            std::env::remove_var("RUNE_MEMORY_PATH");
-        }
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn test_memory_tools_execution() {
-        let temp_dir = std::env::temp_dir().join(format!("rune_test_{}", uuid_or_random()));
-        let _ = std::fs::create_dir_all(&temp_dir);
-        let test_path = temp_dir.join("memory.json");
-        unsafe {
-            std::env::set_var("RUNE_MEMORY_PATH", &test_path);
-        }
+        let _env = TestEnv::new();
 
-        let pref_tool = RememberPreferenceTool;
-        let _res1 = pref_tool
-            .execute(json!({
-                "key": "my_test_key",
-                "value": "my_test_val"
-            }))
-            .await;
-        // Reload store in between tool calls if needed or rely on memory store load()
+        let mut initial_store = MemoryStore::default();
+        initial_store
+            .set_preference("my_test_key", "my_test_val")
+            .unwrap();
+
         let recall_tool = RecallMemoryTool;
-        let res2 = recall_tool
-            .execute(json!({
-                "query": "my_test_key"
-            }))
-            .await;
-        println!("RECALL RES: {}", res2);
-        assert!(res2.contains("my_test_val"));
+        let res = recall_tool.execute(json!({ "query": "my_test_key" })).await;
+        assert!(res.contains("my_test_val"), "recall result: {res}");
 
         let fix_tool = RecordFixTool;
-        let res3 = fix_tool
+        let res = fix_tool
             .execute(json!({
                 "problem": "null pointer in unity component",
                 "solution": "check if component is null before invoking"
             }))
             .await;
-        assert!(res3.contains("Successfully recorded past fix"));
+        assert!(
+            res.contains("Successfully recorded past fix"),
+            "fix result: {res}"
+        );
 
         let rel_tool = RecordFileRelationTool;
-        let res4 = rel_tool
+        let res = rel_tool
             .execute(json!({
                 "file_path": "src/main.rs",
                 "related_symbol": "main",
@@ -88,20 +121,9 @@ mod tests {
                 "notes": "initializes modules"
             }))
             .await;
-        println!("REL RES: {}", res4);
-        assert!(res4.contains("Successfully recorded file and symbol relationship"));
-
-        let _ = std::fs::remove_dir_all(&temp_dir);
-        unsafe {
-            std::env::remove_var("RUNE_MEMORY_PATH");
-        }
-    }
-
-    fn uuid_or_random() -> u64 {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.subsec_nanos() as u64)
-            .unwrap_or(12345)
+        assert!(
+            res.contains("Successfully recorded file and symbol relationship"),
+            "relation result: {res}"
+        );
     }
 }

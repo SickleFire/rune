@@ -256,19 +256,19 @@ mod tests {
     }
 
     #[test]
-    fn test_with_tool_on_all() {
+    fn test_multi_agent_role_models_summary() {
         let config = MultiAgentConfig {
             agents: vec![
                 AgentConfig {
                     name: "Architect".into(),
                     role: AgentRole::Architect,
-                    model: "test-model".into(),
+                    model: "gemini-pro".into(),
                     system_prompt: None,
                 },
                 AgentConfig {
                     name: "Coder".into(),
                     role: AgentRole::Coder,
-                    model: "test-model".into(),
+                    model: "gpt-4o".into(),
                     system_prompt: None,
                 },
             ],
@@ -277,10 +277,15 @@ mod tests {
             "test-key".into(),
             "test-model".into(),
         ));
-        let orchestrator =
-            MultiAgentOrchestrator::new(provider, std::path::PathBuf::from("."), config).unwrap();
-        let tool = std::sync::Arc::new(crate::memory_tools::RememberPreferenceTool);
-        let orchestrator_with_tool = orchestrator.with_tool_on_all(tool);
-        assert_eq!(orchestrator_with_tool.agents.len(), 2);
+        let mut orchestrator = MultiAgentOrchestrator::new(provider, std::path::PathBuf::from("."), config).unwrap();
+        let summary = orchestrator.get_active_models_summary();
+        assert!(summary.contains("Architect"));
+        assert!(summary.contains("gemini-pro"));
+        assert!(summary.contains("Coder"));
+        assert!(summary.contains("gpt-4o"));
+
+        assert!(orchestrator.set_model_for_role(AgentRole::Coder, "gpt-4o-mini".into()));
+        let summary2 = orchestrator.get_active_models_summary();
+        assert!(summary2.contains("gpt-4o-mini"));
     }
 }
