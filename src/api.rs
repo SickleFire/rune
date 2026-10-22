@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::task;
 
-const MAX_PROJECT_MAP_CHARS: usize = 12_000;
+const MAX_PROJECT_MAP_CHARS: usize = 3_000;
 const MAX_TOOL_RESULT_CHARS: usize = 8_000;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -1060,22 +1060,18 @@ impl Agent {
     fn initialize_system_context(&mut self) {
         let project_map = truncate_project_map(self.build_project_map(&self.workspace_root, ""));
         let system_prompt = format!(
-            "You are Rune, an expert AI coding assistant integrated into a software development workspace.\n\
+            "You are Rune, an expert AI coding assistant.\n\
             \n\
-            ## Repository Architecture & File Tree:\n\
+            ## Repository Architecture:\n\
             {project_map}\n\
             \n\
-            ## Guidelines & Smart Context:\n\
-            - You have global awareness of the repository architecture from the file tree above.\n\
-            - When the user mentions specific files using `@filename` (e.g. `@src/api.rs`), those files are automatically loaded and injected into your prompt context.\n\
-            - Use `search_code` (powered by the `cix` indexed search engine) to instantly search for functions, symbols, or patterns across the repository when you need to locate code.\n\
-            - Use `search_symbol` (powered by the `cix` indexed search engine) to get symbols of a file.\n\
-            - **Token-Efficient Reading Workflow**: When inspecting large files, use `search_symbol` first to locate target line numbers, then call `read_file` with `start_line` and `end_line` to fetch only relevant lines. Tool output is capped at 8,000 characters; use narrower line ranges or search queries to retrieve omitted content.
-            - **Rune Notes Workflow**: Prioritize relevant rune notes in `.rune/notes/` before reading raw source files. Treat the notes as a directed graph: for specific tasks, use `search_notes` with targeted keywords first; for broad or unfamiliar topics, start with `read_rune_note` on `overview.md` when available. Read neighboring notes only when the current note explicitly connects to them, preferably with Wiki-style links (`[[note_path.md]]`); never read unrelated notes or scan the full store blindly. Follow links only as needed for the task.\n\
-            - Use `read_file`, `list_files`, `write_file`, `patch_file`, `execute_commands`, and `execute_batch` as needed to inspect and modify code.\n\
-            - Prefer `patch_file` over `write_file` for surgical code edits using search and replace blocks.\n\
-            - Be concise, precise, and proactive.\n\
-            - **Avoid Endless Tool Loops**: Do not perform excessive read-only tool calls without writing or patching code. Take action, edit files, and synthesize answers promptly to prevent rate limits."
+            ## Guidelines:\n\
+            - Use `@filename` to read specific files into context.\n\
+            - Use `search_code` & `search_symbol` (cix engine) to locate functions/symbols.\n\
+            - **Token-Efficient Reading**: Use `search_symbol` then `read_file` with line ranges (`start_line`, `end_line`). Max tool output is 8,000 chars.\n\
+            - **Rune Notes**: Search `.rune/notes/` via `search_notes` before raw source files when applicable.\n\
+            - **Memory**: Check past fixes with `recall_memory`, record successes with `add_fix`.\n\
+            - **Tools**: Prefer `patch_file` over `write_file`. Avoid endless read loops; take action promptly."
         );
 
         self.history.push(CanonicalMessage::User(format!(
