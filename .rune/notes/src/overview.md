@@ -26,3 +26,4 @@ This directory contains the core Rust implementation of Rune. Below is an invent
 - **`godot_tools.rs` & `unity_tools.rs`**: Game engine integration helpers for Godot and Unity projects.
 - **`web_tools.rs`**: Web scraping and HTTP request tools.
 - **`memory_tests.rs`**: Unit tests for memory and state tracking.
+- **Testing & QA**: Comprehensive unit tests covering configuration parsing, path security guardrails, file editing/patching, and integration tools (see [[../concepts/testing.md|Testing & QA]]).

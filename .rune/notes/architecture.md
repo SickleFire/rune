@@ -16,6 +16,7 @@ This note maps out the source files in `src/` and their roles in the Rune assist
 - **`src/tools.rs`**: Core tool registry and trait definitions (`AgentTool`).
 - **`src/memory.rs` & `src/memory_tools.rs`**: Persistent storage for agent preferences, code solutions, and file relationship maps.
 - **`src/notes_tools.rs`**: Rune Notes management (`list_rune_notes`, `read_rune_note`, `upsert_rune_note`).
+- **Testing**: Comprehensive test suite across configuration, tool guardrails, and integrations (see [[concepts/testing.md|Testing & QA]]).
 - **Integration Tools**:
   - `github_tools.rs`
   - `docker_tools.rs`
