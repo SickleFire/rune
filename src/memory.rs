@@ -116,6 +116,17 @@ impl MemoryStore {
             .collect()
     }
 
+    pub fn find_fix_for_error(&self, error_output: &str) -> Option<&PastFix> {
+        let err_lower = error_output.to_lowercase();
+        // Check if any stored fix problem or keywords within the problem match the error output
+        self.past_fixes.iter().find(|f| {
+            let prob = f.problem.to_lowercase();
+            // If the error output contains the problem description or vice versa (for significant overlap)
+            // Or if specific error substrings match
+            err_lower.contains(&prob) || (prob.len() > 3 && err_lower.contains(&prob))
+        })
+    }
+
     pub fn add_file_relation(
         &mut self,
         file_path: impl Into<String>,

@@ -87,6 +87,25 @@ mod tests {
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)]
+    async fn test_find_fix_for_error() {
+        let _env = TestEnv::new();
+        let mut store = MemoryStore::default();
+        store
+            .add_fix("error[E0308]: mismatched types", "convert i32 to u32 using as u32")
+            .unwrap();
+
+        let loaded = MemoryStore::load();
+        let fix = loaded.find_fix_for_error("error[E0308]: mismatched types found in expression");
+        assert!(fix.is_some());
+        let f = fix.unwrap();
+        assert_eq!(f.solution, "convert i32 to u32 using as u32");
+
+        let no_fix = loaded.find_fix_for_error("some completely unrelated error");
+        assert!(no_fix.is_none());
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn test_memory_tools_execution() {
         let _env = TestEnv::new();
 
