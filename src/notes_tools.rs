@@ -1,7 +1,9 @@
 use crate::api::FunctionDeclaration;
+use crate::memory::MemoryStore;
 use crate::tools::AgentTool;
 use async_trait::async_trait;
-use serde_json::json;
+use serde::Serialize;
+use serde_json::{Value, json};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -40,11 +42,14 @@ fn collect_note_files(dir: &Path) -> Vec<(String, PathBuf)> {
         if let Ok(entries) = fs::read_dir(path) {
             for entry in entries.flatten() {
                 let p = entry.path();
-                if p.is_dir() {
+                let Ok(file_type) = entry.file_type() else {
+                    continue;
+                };
+                if file_type.is_dir() {
                     stack.push(p);
-                } else if p
-                    .extension()
-                    .map_or(false, |ext| ext == "md" || ext == "markdown")
+                } else if file_type.is_file()
+                    && p.extension()
+                        .map_or(false, |ext| ext == "md" || ext == "markdown")
                 {
                     let rel = match p.strip_prefix(dir) {
                         Ok(r) => r.to_string_lossy().replace('\\', "/"),
@@ -57,6 +62,387 @@ fn collect_note_files(dir: &Path) -> Vec<(String, PathBuf)> {
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
     out
+}
+
+#[derive(Clone, Debug)]
+struct NoteMetadata {
+    path: String,
+    tags: HashSet<String>,
+    links: Vec<String>,
+    keywords: HashSet<String>,
+    file_references: HashSet<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct RelatedNote {
+    path: String,
+    score: u32,
+    reasons: Vec<String>,
+}
+
+fn parse_note(path: String, content: &str) -> NoteMetadata {
+    let mut title = String::new();
+    let mut tags = HashSet::new();
+    let lines: Vec<&str> = content.lines().collect();
+    if lines.first().map(|line| line.trim()) == Some("---") {
+        let mut current_field = "";
+        for line in lines.iter().skip(1) {
+            let line = line.trim();
+            if line == "---" || line == "..." {
+                break;
+            }
+            if let Some((key, value)) = line.split_once(':') {
+                current_field = key.trim();
+                let value = value.trim();
+                if current_field == "title" {
+                    title = unquote(value).to_string();
+                } else if current_field == "tags" {
+                    for tag in parse_yaml_list(value) {
+                        tags.insert(tag.to_lowercase());
+                    }
+                }
+            } else if current_field == "tags" {
+                let item = line.trim_start_matches('-').trim();
+                if !item.is_empty() {
+                    tags.insert(unquote(item).to_lowercase());
+                }
+            } else {
+                current_field = "";
+            }
+        }
+    }
+
+    if title.is_empty() {
+        title = Path::new(&path)
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap_or(&path)
+            .to_string();
+    }
+
+    let links = extract_wiki_links(content);
+    let mut searchable = format!("{} {} {}", title, path, content);
+    for link in &links {
+        searchable = searchable.replace(&format!("[[{link}]]"), " ");
+    }
+    let keywords = tokenize(&searchable);
+    let file_references = extract_file_references(&path, content);
+
+    NoteMetadata {
+        path,
+        tags,
+        links,
+        keywords,
+        file_references,
+    }
+}
+
+fn unquote(value: &str) -> &str {
+    let value = value.trim();
+    if value.len() >= 2
+        && ((value.starts_with('"') && value.ends_with('"'))
+            || (value.starts_with('\'') && value.ends_with('\'')))
+    {
+        &value[1..value.len() - 1]
+    } else {
+        value
+    }
+}
+
+fn parse_yaml_list(value: &str) -> Vec<String> {
+    let value = value.trim();
+    let value = if value.starts_with('[') && value.ends_with(']') {
+        &value[1..value.len() - 1]
+    } else {
+        value
+    };
+    value
+        .split(',')
+        .map(|item| unquote(item.trim()).trim().to_string())
+        .filter(|item| !item.is_empty())
+        .collect()
+}
+
+fn extract_wiki_links(content: &str) -> Vec<String> {
+    let mut links = Vec::new();
+    let mut remaining = content;
+    while let Some(start) = remaining.find("[[") {
+        remaining = &remaining[start + 2..];
+        let Some(end) = remaining.find("]]") else {
+            break;
+        };
+        let link = remaining[..end].split('|').next().unwrap_or("").trim();
+        if !link.is_empty() {
+            links.push(link.replace('\\', "/"));
+        }
+        remaining = &remaining[end + 2..];
+    }
+    links
+}
+
+fn tokenize(text: &str) -> HashSet<String> {
+    const STOP_WORDS: &[&str] = &[
+        "and", "are", "for", "from", "has", "have", "into", "not", "that", "the", "their", "then",
+        "this", "with", "you", "your", "use", "using", "when", "where", "which",
+    ];
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter_map(|word| {
+            let word = word.to_lowercase();
+            (word.chars().count() > 2 && !STOP_WORDS.contains(&word.as_str())).then_some(word)
+        })
+        .collect()
+}
+
+fn extract_file_references(note_path: &str, content: &str) -> HashSet<String> {
+    let mut references = HashSet::new();
+    let normalized_path = note_path.replace('\\', "/");
+    if let Some(source_path) = normalized_path.strip_suffix(".md") {
+        if source_path.contains('/') && Path::new(source_path).extension().is_some() {
+            references.insert(source_path.to_lowercase());
+        }
+    }
+
+    let mut remaining = content;
+    while let Some(start) = remaining.find('`') {
+        remaining = &remaining[start + 1..];
+        let Some(end) = remaining.find('`') else {
+            break;
+        };
+        let reference = remaining[..end].trim().replace('\\', "/");
+        if reference.contains('/')
+            && Path::new(&reference).extension().is_some()
+            && !reference.starts_with("http")
+        {
+            references.insert(reference.to_lowercase());
+        }
+        remaining = &remaining[end + 1..];
+    }
+    references
+}
+
+fn resolve_note_link(
+    link: &str,
+    source_path: &str,
+    known_paths: &HashSet<String>,
+) -> Option<String> {
+    let link = link.trim_start_matches("./").to_lowercase();
+    let source_parent = Path::new(source_path)
+        .parent()
+        .unwrap_or_else(|| Path::new(""));
+    let relative = source_parent
+        .join(&link)
+        .to_string_lossy()
+        .replace('\\', "/");
+    let variants = [
+        relative.to_lowercase(),
+        link.clone(),
+        format!("{}.md", link),
+    ];
+    for variant in &variants {
+        if known_paths.contains(variant) {
+            return Some(variant.clone());
+        }
+    }
+    known_paths
+        .iter()
+        .find(|path| path.ends_with(&format!("/{link}")) || path.ends_with(&format!("/{link}.md")))
+        .cloned()
+}
+
+fn recall_related_notes(
+    dir: &Path,
+    target_path: &str,
+    memory: &MemoryStore,
+    limit: usize,
+) -> Result<Vec<RelatedNote>, String> {
+    if !is_safe_rel(target_path) {
+        return Err("Access denied (path outside .rune/notes/).".to_string());
+    }
+    let root =
+        fs::canonicalize(dir).map_err(|e| format!("Could not resolve notes directory: {e}"))?;
+    let target = fs::canonicalize(dir.join(target_path))
+        .map_err(|_| format!("Rune-note '{}' not found in .rune/notes/.", target_path))?;
+    if !target.starts_with(&root) {
+        return Err("Access denied (path outside .rune/notes/).".to_string());
+    }
+
+    let files = collect_note_files(dir);
+    let mut notes = Vec::with_capacity(files.len());
+    for (path, full_path) in files {
+        let canonical_path = fs::canonicalize(&full_path)
+            .map_err(|e| format!("Could not resolve rune-note '{}': {e}", path))?;
+        if !canonical_path.starts_with(&root) {
+            continue;
+        }
+        let content = fs::read_to_string(&canonical_path)
+            .map_err(|e| format!("Error reading rune-note '{}': {e}", path))?;
+        notes.push(parse_note(path, &content));
+    }
+    let target_path = target
+        .strip_prefix(&root)
+        .map_err(|_| "Access denied (path outside .rune/notes/).".to_string())?
+        .to_string_lossy()
+        .replace('\\', "/")
+        .to_lowercase();
+    let Some(target_index) = notes
+        .iter()
+        .position(|note| note.path.to_lowercase() == target_path)
+    else {
+        return Err(format!(
+            "Rune-note '{}' not found in .rune/notes/.",
+            target_path
+        ));
+    };
+
+    let known_paths: HashSet<String> = notes.iter().map(|note| note.path.to_lowercase()).collect();
+    let target_note = &notes[target_index];
+    let mut linked_paths = HashSet::new();
+    for link in &target_note.links {
+        if let Some(path) = resolve_note_link(link, &target_note.path, &known_paths) {
+            linked_paths.insert(path);
+        }
+    }
+    for note in &notes {
+        if note.path.eq_ignore_ascii_case(&target_note.path) {
+            continue;
+        }
+        if note.links.iter().any(|link| {
+            resolve_note_link(link, &note.path, &known_paths)
+                .map(|path| path == target_path)
+                .unwrap_or(false)
+        }) {
+            linked_paths.insert(note.path.to_lowercase());
+        }
+    }
+
+    let mut results = Vec::new();
+    for (index, candidate) in notes.iter().enumerate() {
+        if index == target_index {
+            continue;
+        }
+        let mut score = 0;
+        let mut reasons = Vec::new();
+        if linked_paths.contains(&candidate.path.to_lowercase()) {
+            score += 100;
+            reasons.push("wiki link".to_string());
+        }
+
+        let shared_tags: Vec<&String> = target_note.tags.intersection(&candidate.tags).collect();
+        if !shared_tags.is_empty() {
+            score += (shared_tags.len() as u32 * 15).min(45);
+            reasons.push(format!(
+                "shared tags ({})",
+                shared_tags
+                    .iter()
+                    .map(|tag| tag.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+
+        let shared_keywords: Vec<&String> = target_note
+            .keywords
+            .intersection(&candidate.keywords)
+            .collect();
+        if !shared_keywords.is_empty() {
+            score += (shared_keywords.len() as u32 * 2).min(20);
+            reasons.push(format!("keyword overlap ({} terms)", shared_keywords.len()));
+        }
+
+        let relation = memory.file_relations.iter().find(|relation| {
+            let source = relation.file_path.replace('\\', "/").to_lowercase();
+            let target = relation.target_file.replace('\\', "/").to_lowercase();
+            (target_note.file_references.contains(&source)
+                && candidate.file_references.contains(&target))
+                || (target_note.file_references.contains(&target)
+                    && candidate.file_references.contains(&source))
+        });
+        if let Some(relation) = relation {
+            score += 60;
+            reasons.push(format!("memory relation ({})", relation.relation_type));
+        }
+
+        if score > 0 {
+            results.push(RelatedNote {
+                path: candidate.path.clone(),
+                score,
+                reasons,
+            });
+        }
+    }
+    results.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.path.cmp(&b.path)));
+    results.truncate(limit);
+    Ok(results)
+}
+
+pub struct RecallRelatedRuneNotesTool;
+
+#[async_trait]
+impl AgentTool for RecallRelatedRuneNotesTool {
+    fn declaration(&self) -> FunctionDeclaration {
+        FunctionDeclaration {
+            name: "recall_related_notes".to_string(),
+            description: "Recall prioritized related Rune Notes using wiki links, shared tags, overlapping keywords, and file relations stored in memory.".to_string(),
+            parameters: json!({
+                "type": "OBJECT",
+                "properties": {
+                    "note_path": {
+                        "type": "STRING",
+                        "description": "The note path relative to .rune/notes/."
+                    },
+                    "limit": {
+                        "type": "INTEGER",
+                        "description": "Maximum number of related notes to return (default 10, maximum 50)."
+                    },
+                    "format": {
+                        "type": "STRING",
+                        "enum": ["text", "json"],
+                        "description": "Return a readable list or JSON objects (default text)."
+                    }
+                },
+                "required": ["note_path"]
+            }),
+        }
+    }
+
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
+    async fn execute(&self, args: Value) -> String {
+        let note_path = match args.get("note_path").and_then(Value::as_str) {
+            Some(path) => path,
+            None => return "Error: 'note_path' parameter is required.".to_string(),
+        };
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(10)
+            .clamp(1, 50) as usize;
+        let results =
+            match recall_related_notes(&notes_dir(), note_path, &MemoryStore::load(), limit) {
+                Ok(results) => results,
+                Err(error) => return format!("Error recalling related notes: {error}"),
+            };
+
+        if args.get("format").and_then(Value::as_str) == Some("json") {
+            return serde_json::to_string_pretty(&results)
+                .unwrap_or_else(|error| format!("Error serializing recall results: {error}"));
+        }
+        if results.is_empty() {
+            return format!("No related notes found for '{}'.", note_path);
+        }
+        let mut output = format!("Related notes for '{}':\n", note_path);
+        for result in results {
+            output.push_str(&format!(
+                "- {} (score: {}): {}\n",
+                result.path,
+                result.score,
+                result.reasons.join(", ")
+            ));
+        }
+        output
+    }
 }
 
 pub struct ListRuneNotesTool;
@@ -677,3 +1063,7 @@ impl AgentTool for RenderRuneNotesTool {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "notes_tools_tests.rs"]
+mod related_notes_tests;

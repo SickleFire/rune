@@ -1142,7 +1142,7 @@ impl Agent {
             - Use `@filename` to read specific files into context.\n\
             - Use `search_code` & `search_symbol` (cix engine) to locate functions/symbols.\n\
             - **Token-Efficient Reading**: Use `search_symbol` then `read_file` with line ranges (`start_line`, `end_line`). Max tool output is 8,000 chars.\n\
-            - **Rune Notes**: Search `.rune/notes/` via `search_notes` before raw source files when applicable. Upsert knowledge notes using `upsert_rune_note`.\n\
+            - **Rune Notes**: For specific tasks, search `.rune/notes/` via `search_notes` before raw source files when applicable. For broad or unfamiliar topics, start with `overview.md`. Use `recall_related_notes` with a relevant note's relative path to prioritize neighboring notes by wiki links, tags, keywords, and memory file relations; read only useful results. Upsert knowledge notes using `upsert_rune_note`.\n\
             - **Memory**: Check past fixes with `recall_memory`, record successes with `add_fix`.\n\
             - **Tools**: Prefer `patch_file` over `write_file`. Avoid endless read loops; take action promptly."
         );

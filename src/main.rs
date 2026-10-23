@@ -385,6 +385,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         ))
         .with_tool_on_all(std::sync::Arc::new(
             rune_code::notes_tools::SearchRuneNotesTool,
+        ))
+        .with_tool_on_all(std::sync::Arc::new(
+            rune_code::notes_tools::RecallRelatedRuneNotesTool,
         ));
 
     if enable_unity_lite {

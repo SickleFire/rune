@@ -21,3 +21,4 @@ Rune is an expert AI coding assistant integration framework written in Rust.
 - **Tool Ecosystem (`src/tools.rs`, `src/*_tools.rs`)**: Extensible tools for GitHub, Docker, MySQL, Unity, Godot, Web search, and now **Rune Notes** (`.rune/notes/`).
 - **Memory Subsystem (`src/memory.rs`, `src/memory_tools.rs`)**: Persistent JSON memory store for preferences, past fixes, and file relationships.
 - **Rune Notes (`.rune/notes/`)**: Markdown-based knowledge nodes allowing Rune to read, save, and navigate contextual ideas and file-specific insights across sessions without bloating token windows.
+- **Related note recall:** `recall_related_notes` ranks neighboring notes from wiki links, frontmatter tags, keyword overlap, and file relationships stored in `.rune/memory.json`. It returns paths, relevance scores, and match reasons, with optional JSON output.
