@@ -128,6 +128,37 @@ pub struct GeminiProvider {
     request_limiter: GeminiRequestLimiter,
 }
 
+pub struct GeminiCascadingProvider {
+    api_key: String,
+    models: Vec<String>,
+    client: reqwest::Client,
+    request_limiter: GeminiRequestLimiter,
+}
+
+impl GeminiCascadingProvider {
+    pub fn new(api_key: String, models: Vec<String>) -> Self {
+        let _primary_model = models.first().cloned().unwrap_or_else(|| "gemini-3.5-flash-lite".to_string());
+        Self {
+            api_key,
+            models,
+            client: reqwest::Client::new(),
+            request_limiter: GeminiRequestLimiter::new(Duration::from_secs(1), None),
+        }
+    }
+
+    pub fn with_request_limits(
+        mut self,
+        minimum_interval: Duration,
+        max_input_tokens_per_minute: Option<usize>,
+    ) -> Self {
+        self.request_limiter = GeminiRequestLimiter::new(
+            minimum_interval.max(Duration::from_millis(1)),
+            max_input_tokens_per_minute,
+        );
+        self
+    }
+}
+
 struct GeminiRequestLimiter {
     minimum_interval: Duration,
     max_input_tokens_per_minute: Option<usize>,
@@ -338,6 +369,48 @@ impl GeminiProvider {
             }
         }
         out
+    }
+}
+
+#[async_trait]
+impl LLMProvider for GeminiCascadingProvider {
+    async fn complete(
+        &self,
+        history: &[CanonicalMessage],
+        tools: &[FunctionDeclaration],
+        _model: &str,
+        on_text: &(dyn Fn(String) + Send + Sync),
+    ) -> Result<ProviderResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let models = if self.models.is_empty() {
+            vec!["gemini-3.5-flash-lite".to_string()]
+        } else {
+            self.models.clone()
+        };
+
+        let mut last_err = None;
+        for (idx, model_name) in models.iter().enumerate() {
+            let provider = GeminiProvider {
+                client: self.client.clone(),
+                api_key: self.api_key.clone(),
+                model: model_name.clone(),
+                request_limiter: GeminiRequestLimiter::new(
+                    self.request_limiter.minimum_interval,
+                    self.request_limiter.max_input_tokens_per_minute,
+                ),
+            };
+
+            println!("[Gemini Cascading] Attempting completion with model '{}' ({}/{})", model_name, idx + 1, models.len());
+            match provider.complete(history, tools, model_name, on_text).await {
+                Ok(resp) => return Ok(resp),
+                Err(e) => {
+                    let err_str = e.to_string();
+                    println!("[Gemini Cascading] Model '{}' failed: {}. Falling back...", model_name, err_str);
+                    last_err = Some(e);
+                }
+            }
+        }
+
+        Err(last_err.unwrap_or_else(|| "All Gemini cascading models failed".into()))
     }
 }
 
@@ -1069,7 +1142,7 @@ impl Agent {
             - Use `@filename` to read specific files into context.\n\
             - Use `search_code` & `search_symbol` (cix engine) to locate functions/symbols.\n\
             - **Token-Efficient Reading**: Use `search_symbol` then `read_file` with line ranges (`start_line`, `end_line`). Max tool output is 8,000 chars.\n\
-            - **Rune Notes**: Search `.rune/notes/` via `search_notes` before raw source files when applicable.\n\
+            - **Rune Notes**: Search `.rune/notes/` via `search_notes` before raw source files when applicable. Upsert knowledge notes using `upsert_rune_note`.\n\
             - **Memory**: Check past fixes with `recall_memory`, record successes with `add_fix`.\n\
             - **Tools**: Prefer `patch_file` over `write_file`. Avoid endless read loops; take action promptly."
         );

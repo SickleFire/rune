@@ -163,13 +163,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let default_provider: Arc<dyn LLMProvider> = if provider_name.eq_ignore_ascii_case("gemini")
         || (!gemini_api_key.is_empty() && provider_name == "auto")
     {
-        Arc::new(
-            rune_code::api::GeminiProvider::new(gemini_api_key.clone(), gemini_model.clone())
-                .with_request_limits(
-                    std::time::Duration::from_millis(config.gemini_min_request_interval_ms),
-                    config.gemini_max_input_tokens_per_minute,
-                ),
-        )
+        if config.enable_gemini_cascade {
+            let cascade_models = config.gemini_cascade_models.clone().unwrap_or_else(|| {
+                vec![gemini_model.clone(), "gemini-3.8-flash".to_string(), "gemini-3.6-flash".to_string()]
+            });
+            println!("[Rune: Using Gemini Cascading Provider with models: {:?}]", cascade_models);
+            Arc::new(
+                rune_code::api::GeminiCascadingProvider::new(gemini_api_key.clone(), cascade_models)
+                    .with_request_limits(
+                        std::time::Duration::from_millis(config.gemini_min_request_interval_ms),
+                        config.gemini_max_input_tokens_per_minute,
+                    ),
+            )
+        } else {
+            Arc::new(
+                rune_code::api::GeminiProvider::new(gemini_api_key.clone(), gemini_model.clone())
+                    .with_request_limits(
+                        std::time::Duration::from_millis(config.gemini_min_request_interval_ms),
+                        config.gemini_max_input_tokens_per_minute,
+                    ),
+            )
+        }
     } else if provider_name.eq_ignore_ascii_case("openai")
         || (!openai_api_key.is_empty() && provider_name == "auto")
     {
@@ -227,13 +241,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .with_reasoning_effort("none"),
         )
     } else if !gemini_api_key.is_empty() {
-        Arc::new(
-            rune_code::api::GeminiProvider::new(gemini_api_key.clone(), gemini_model.clone())
-                .with_request_limits(
-                    std::time::Duration::from_millis(config.gemini_min_request_interval_ms),
-                    config.gemini_max_input_tokens_per_minute,
-                ),
-        )
+        if config.enable_gemini_cascade {
+            let cascade_models = config.gemini_cascade_models.clone().unwrap_or_else(|| {
+                vec![gemini_model.clone(), "gemini-2.5-flash".to_string(), "gemini-3.5-flash-lite".to_string()]
+            });
+            Arc::new(
+                rune_code::api::GeminiCascadingProvider::new(gemini_api_key.clone(), cascade_models)
+                    .with_request_limits(
+                        std::time::Duration::from_millis(config.gemini_min_request_interval_ms),
+                        config.gemini_max_input_tokens_per_minute,
+                    ),
+            )
+        } else {
+            Arc::new(
+                rune_code::api::GeminiProvider::new(gemini_api_key.clone(), gemini_model.clone())
+                    .with_request_limits(
+                        std::time::Duration::from_millis(config.gemini_min_request_interval_ms),
+                        config.gemini_max_input_tokens_per_minute,
+                    ),
+            )
+        }
     } else if !openai_api_key.is_empty() {
         Arc::new(
             rune_code::api::OpenAIProvider::new(openai_api_key.clone(), openai_model.clone())
@@ -689,18 +716,36 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 });
                                 let model =
                                     model_arg.clone().unwrap_or_else(|| gemini_model.clone());
-                                (
-                                    Arc::new(
-                                        rune_code::api::GeminiProvider::new(key, model.clone())
-                                            .with_request_limits(
-                                                std::time::Duration::from_millis(
-                                                    config.gemini_min_request_interval_ms,
+                                if config.enable_gemini_cascade {
+                                    let cascade_models = config.gemini_cascade_models.clone().unwrap_or_else(|| {
+                                        vec![model.clone(), "gemini-2.5-flash".to_string(), "gemini-3.5-flash-lite".to_string()]
+                                    });
+                                    (
+                                        Arc::new(
+                                            rune_code::api::GeminiCascadingProvider::new(key, cascade_models)
+                                                .with_request_limits(
+                                                    std::time::Duration::from_millis(
+                                                        config.gemini_min_request_interval_ms,
+                                                    ),
+                                                    config.gemini_max_input_tokens_per_minute,
                                                 ),
-                                                config.gemini_max_input_tokens_per_minute,
-                                            ),
-                                    ),
-                                    model,
-                                )
+                                        ),
+                                        model,
+                                    )
+                                } else {
+                                    (
+                                        Arc::new(
+                                            rune_code::api::GeminiProvider::new(key, model.clone())
+                                                .with_request_limits(
+                                                    std::time::Duration::from_millis(
+                                                        config.gemini_min_request_interval_ms,
+                                                    ),
+                                                    config.gemini_max_input_tokens_per_minute,
+                                                ),
+                                        ),
+                                        model,
+                                    )
+                                }
                             }
                             "openai" => {
                                 let key = config.openai_api_key.clone().unwrap_or_else(|| {
