@@ -1143,9 +1143,35 @@ impl Agent {
         let mut lines = Vec::new();
         for entry in entries.filter_map(|e| e.ok()) {
             let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("md") {
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    let mut title = path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown").to_string();
+            let mut md_path = None;
+            let mut rel_note_path = String::new();
+
+            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("md") {
+                md_path = Some(path.clone());
+                rel_note_path = format!("skills/{}", path.file_name().unwrap().to_string_lossy());
+            } else if path.is_dir() {
+                // Option A: Skill folder containing SKILL.md or <folder_name>.md
+                let skill_md = path.join("SKILL.md");
+                if skill_md.exists() {
+                    md_path = Some(skill_md);
+                    let folder_name = path.file_name().unwrap().to_string_lossy();
+                    rel_note_path = format!("skills/{}/SKILL.md", folder_name);
+                } else {
+                    let folder_name = path.file_name().unwrap().to_string_lossy();
+                    let alt_md = path.join(format!("{}.md", folder_name));
+                    if alt_md.exists() {
+                        md_path = Some(alt_md);
+                        rel_note_path = format!("skills/{}/{}.md", folder_name, folder_name);
+                    }
+                }
+            }
+
+            if let Some(md_file) = md_path {
+                if let Ok(content) = std::fs::read_to_string(&md_file) {
+                    let mut title = md_file.parent()
+                        .and_then(|p| p.file_name())
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "unknown".to_string());
                     let mut description = String::new();
                     
                     // Parse frontmatter
@@ -1162,11 +1188,46 @@ impl Agent {
                             }
                         }
                     }
-                    let rel_path = format!("skills/{}", path.file_name().unwrap().to_string_lossy());
+
+                    // Check for accompanying scripts in the skill folder or scripts/ subfolder (with recursive support)
+                    let mut script_info = String::new();
+                    if let Some(parent_dir) = md_file.parent() {
+                        let base_skills_dir = self.workspace_root.join(".rune").join("notes").join("skills");
+                        if parent_dir.is_dir() && parent_dir != base_skills_dir {
+                            let mut all_scripts = Vec::new();
+                            
+                            // Recursive helper to collect relative script paths
+                            fn collect_scripts(dir: &std::path::Path, base: &std::path::Path, list: &mut Vec<String>) {
+                                if let Ok(entries) = std::fs::read_dir(dir) {
+                                    for entry in entries.filter_map(|e| e.ok()) {
+                                        let p = entry.path();
+                                        if p.is_dir() {
+                                            collect_scripts(&p, base, list);
+                                        } else if p.is_file() {
+                                            // Exclude the markdown file itself if it's in base
+                                            if let Ok(rel) = p.strip_prefix(base) {
+                                                let rel_str = rel.to_string_lossy().replace('\\', "/");
+                                                if !rel_str.ends_with(".md") && !rel_str.is_empty() {
+                                                    list.push(rel_str);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            collect_scripts(parent_dir, parent_dir, &mut all_scripts);
+                            if !all_scripts.is_empty() {
+                                all_scripts.sort();
+                                script_info = format!(" [Scripts: {}]", all_scripts.join(", "));
+                            }
+                        }
+                    }
+
                     if description.is_empty() {
-                        lines.push(format!("- `{rel_path}` ({title})"));
+                        lines.push(format!("- `{rel_note_path}` ({title}){script_info}"));
                     } else {
-                        lines.push(format!("- `{rel_path}`: {description} (Title: {title})"));
+                        lines.push(format!("- `{rel_note_path}`: {description} (Title: {title}){script_info}"));
                     }
                 }
             }
