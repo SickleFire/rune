@@ -1130,19 +1130,72 @@ impl Agent {
         self.dynamic_tools.retain(|_, tool| !tool.is_destructive());
     }
 
+    fn load_skills_summary(&self) -> String {
+        let skills_dir = self.workspace_root.join(".rune").join("notes").join("skills");
+        if !skills_dir.exists() {
+            return String::new();
+        }
+        let entries = match std::fs::read_dir(skills_dir) {
+            Ok(e) => e,
+            Err(_) => return String::new(),
+        };
+
+        let mut lines = Vec::new();
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("md") {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    let mut title = path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown").to_string();
+                    let mut description = String::new();
+                    
+                    // Parse frontmatter
+                    if content.starts_with("---") {
+                        let rest = &content[3..];
+                        if let Some(end_idx) = rest.find("---") {
+                            let fm = &rest[..end_idx];
+                            for line in fm.lines() {
+                                if let Some(stripped) = line.strip_prefix("title:") {
+                                    title = stripped.trim().trim_matches('"').to_string();
+                                } else if let Some(stripped) = line.strip_prefix("description:") {
+                                    description = stripped.trim().trim_matches('"').to_string();
+                                }
+                            }
+                        }
+                    }
+                    let rel_path = format!("skills/{}", path.file_name().unwrap().to_string_lossy());
+                    if description.is_empty() {
+                        lines.push(format!("- `{rel_path}` ({title})"));
+                    } else {
+                        lines.push(format!("- `{rel_path}`: {description} (Title: {title})"));
+                    }
+                }
+            }
+        }
+
+        if lines.is_empty() {
+            return String::new();
+        }
+
+        format!(
+            "\n## Available Skills (Load on-demand with `read_rune_note` or `search_notes`):\n{}\n",
+            lines.join("\n")
+        )
+    }
+
     fn initialize_system_context(&mut self) {
         let project_map = truncate_project_map(self.build_project_map(&self.workspace_root, ""));
+        let skills_summary = self.load_skills_summary();
         let system_prompt = format!(
             "You are Rune, an expert AI coding assistant.\n\
             \n\
             ## Repository Architecture:\n\
             {project_map}\n\
-            \n\
+            {skills_summary}\n\
             ## Guidelines:\n\
             - Use `@filename` to read specific files into context.\n\
             - Use `search_code` & `search_symbol` (cix engine) to locate functions/symbols.\n\
             - **Token-Efficient Reading**: Use `search_symbol` then `read_file` with line ranges (`start_line`, `end_line`). Max tool output is 8,000 chars.\n\
-            - **Rune Notes**: For specific tasks, search `.rune/notes/` via `search_notes` before raw source files when applicable. For broad or unfamiliar topics, start with `overview.md`. Use `recall_related_notes` with a relevant note's relative path to prioritize neighboring notes by wiki links, tags, keywords, and memory file relations; read only useful results. Upsert knowledge notes using `upsert_rune_note`.\n\
+            - **Rune Notes & Skills**: For specific tasks or domain workflows, check available skills above and load full instructions via `read_rune_note` (e.g. `skills/release-verification.md`) or `search_notes`. For broad topics, start with `overview.md`. Use `recall_related_notes` with a relevant note's relative path to prioritize neighboring notes by wiki links, tags, keywords, and memory file relations; read only useful results. Upsert knowledge notes using `upsert_rune_note`.\n\
             - **Memory**: Check past fixes with `recall_memory`, record successes with `add_fix`.\n\
             - **Tools**: Prefer `patch_file` over `write_file`. Avoid endless read loops; take action promptly."
         );

@@ -1,6 +1,7 @@
 {
   "preferences": {
-    "my_test_key": "my_test_val"
+    "my_test_key": "my_test_val",
+    "rune_note_reading_convention": "Always use search_notes or read_rune_note for notes in .rune/notes/, and avoid using raw read_file or list_files on .rune/notes/ directly."
   },
   "past_fixes": [
     {
