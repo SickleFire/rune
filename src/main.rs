@@ -222,10 +222,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             "[Rune: Using Ollama local provider at {} (model: {})]",
             base_url, model
         );
-        Arc::new(
-            rune_code::api::OpenAIProvider::new("ollama-local".into(), model.into())
-                .with_reasoning_effort("none"),
-        )
+        Arc::new(rune_code::api::OllamaProvider::new(base_url, model.into()))
     } else if provider_name.eq_ignore_ascii_case("lmstudio") {
         let base_url = config
             .lm_studio_base_url
@@ -710,7 +707,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         let provider_arg = parts[1].to_lowercase();
                         let model_arg = parts.get(2).map(|s| s.to_string());
 
-                        let (new_provider, _): (Arc<dyn LLMProvider>, String) = match provider_arg
+                        let (new_provider, resolved_model): (Arc<dyn LLMProvider>, String) = match provider_arg
                             .as_str()
                         {
                             "gemini" => {
@@ -804,7 +801,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 )
                             }
                             "ollama" => {
-                                let _base_url = config
+                                let base_url = config
                                     .ollama_base_url
                                     .as_deref()
                                     .unwrap_or("http://localhost:11434");
@@ -815,13 +812,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         .unwrap_or_else(|| "llama3".to_string())
                                 });
                                 (
-                                    Arc::new(
-                                        rune_code::api::OpenAIProvider::new(
-                                            "ollama-local".into(),
-                                            model.clone(),
-                                        )
-                                        .with_reasoning_effort("none"),
-                                    ),
+                                    Arc::new(rune_code::api::OllamaProvider::new(
+                                        base_url,
+                                        model.clone(),
+                                    )),
                                     model,
                                 )
                             }
@@ -853,7 +847,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             }
                         };
 
-                        orchestrator.set_provider_all(new_provider, model_arg);
+                        let model_override = if model_arg.is_some() || orchestrator.agent_count() == 1
+                        {
+                            Some(resolved_model)
+                        } else {
+                            None
+                        };
+                        orchestrator.set_provider_all(new_provider, model_override);
                         println!(
                             "{}",
                             format!(
@@ -1073,6 +1073,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         .anthropic_model
                         .clone()
                         .unwrap_or_else(|| "claude-3-5-sonnet".to_string());
+                    let current_ollama_base_url = config
+                        .ollama_base_url
+                        .clone()
+                        .unwrap_or_else(|| "http://localhost:11434".to_string());
+                    let current_ollama_model = config
+                        .ollama_model
+                        .clone()
+                        .unwrap_or_else(|| "llama3".to_string());
                     let current_mysql_url = config.mysql_url.clone().unwrap_or_default();
 
                     println!("\n[1/4] Provider & API Keys:");
@@ -1098,6 +1106,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         prompt_field("Anthropic Model", &current_anthropic_model);
 
                     println!("\n[3/4] Database & Local Endpoints:");
+                    let new_ollama_base_url =
+                        prompt_field("Ollama Base URL", &current_ollama_base_url);
+                    let new_ollama_model = prompt_field("Ollama Model", &current_ollama_model);
                     let new_mysql_url = prompt_field("MySQL URL (optional)", &current_mysql_url);
 
                     // Rebuild TOML content
@@ -1122,8 +1133,8 @@ openrouter_model = "{new_openrouter_model}"
 anthropic_model = "{new_anthropic_model}"
 
 # Local Endpoints (Ollama / LM Studio)
-ollama_base_url = "http://localhost:11434"
-ollama_model = "llama3"
+ollama_base_url = "{new_ollama_base_url}"
+ollama_model = "{new_ollama_model}"
 
 lm_studio_base_url = "http://localhost:1234/v1"
 lm_studio_model = "local-model"

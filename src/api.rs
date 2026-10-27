@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::io::Write as StdWrite;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::task;
@@ -1004,6 +1005,188 @@ impl LLMProvider for OpenRouterProvider {
     }
 }
 
+pub struct OllamaProvider {
+    inner: OpenAIProvider,
+}
+
+impl OllamaProvider {
+    pub fn new(base_url: impl AsRef<str>, model: String) -> Self {
+        let base_url = base_url.as_ref().trim_end_matches('/');
+        let base_url = base_url.strip_suffix("/v1").unwrap_or(base_url);
+        Self {
+            inner: OpenAIProvider::new("ollama-local".into(), model)
+                .with_base_url(format!("{base_url}/v1")),
+        }
+    }
+}
+
+#[async_trait]
+impl LLMProvider for OllamaProvider {
+    async fn complete(
+        &self,
+        history: &[CanonicalMessage],
+        tools: &[FunctionDeclaration],
+        model: &str,
+        on_text: &(dyn Fn(String) + Send + Sync),
+    ) -> Result<ProviderResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let streamed_text = Arc::new(Mutex::new(String::new()));
+        let streamed_text_for_callback = Arc::clone(&streamed_text);
+        let response = self
+            .inner
+            .complete(history, tools, model, &|text| {
+                streamed_text_for_callback
+                    .lock()
+                    .expect("Ollama response lock poisoned")
+                    .push_str(&text);
+            })
+            .await;
+
+        match response {
+            Ok(mut response) => {
+                if response.tool_calls.is_empty() {
+                    if let Some(tool_call) = parse_ollama_tool_call(&response.text, tools) {
+                        response.text.clear();
+                        response.tool_calls.push(tool_call);
+                    }
+                }
+
+                if !response.text.is_empty() {
+                    on_text(response.text.clone());
+                }
+                Ok(response)
+            }
+            Err(error) => {
+                let partial_text = streamed_text
+                    .lock()
+                    .expect("Ollama response lock poisoned")
+                    .clone();
+                if !partial_text.is_empty() {
+                    on_text(partial_text);
+                }
+                Err(error)
+            }
+        }
+    }
+}
+
+static OLLAMA_TOOL_CALL_ID: AtomicU64 = AtomicU64::new(0);
+
+fn parse_ollama_tool_call(text: &str, tools: &[FunctionDeclaration]) -> Option<CanonicalToolCall> {
+    let text = text.trim();
+    let candidate = text
+        .strip_prefix("```json")
+        .and_then(|text| text.strip_suffix("```"))
+        .map(str::trim)
+        .unwrap_or(text);
+    let value: serde_json::Value = serde_json::from_str(candidate)
+        .or_else(|_| serde_json::from_str(&escape_json_string_controls(candidate)))
+        .ok()?;
+    let name = value.get("name")?.as_str()?;
+    let tool = tools.iter().find(|tool| tool.name == name)?;
+    let mut args = value.get("arguments")?.as_object()?.clone();
+    if let Some(properties) = tool.parameters.get("properties").and_then(|value| value.as_object())
+    {
+        for (argument_name, argument_schema) in properties {
+            let Some(argument) = args.get_mut(argument_name) else {
+                continue;
+            };
+            let expects_string = argument_schema
+                .get("type")
+                .and_then(|value| value.as_str())
+                .is_some_and(|kind| kind.eq_ignore_ascii_case("string"));
+            if expects_string {
+                let Some(wrapped_value) = argument.as_object() else {
+                    continue;
+                };
+                let is_string_schema = wrapped_value
+                    .get("type")
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|kind| kind.eq_ignore_ascii_case("string"));
+                if is_string_schema
+                    && let Some(description) =
+                        wrapped_value.get("description").and_then(|value| value.as_str())
+                {
+                    *argument = serde_json::Value::String(description.to_string());
+                }
+            }
+        }
+    }
+    if name == "upsert_rune_note"
+        && let Some(serde_json::Value::String(content)) = args.get_mut("content")
+        && let Some(markdown) = ollama_summary_json_to_markdown(content)
+    {
+        *content = markdown;
+    }
+
+    Some(CanonicalToolCall {
+        id: format!(
+            "ollama-tool-call-{}",
+            OLLAMA_TOOL_CALL_ID.fetch_add(1, Ordering::Relaxed)
+        ),
+        name: name.into(),
+        args: serde_json::Value::Object(args),
+        thought_signature: None,
+    })
+}
+
+fn ollama_summary_json_to_markdown(content: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(content)
+        .or_else(|_| serde_json::from_str(&escape_json_string_controls(content)))
+        .ok()?;
+    let summary = value.get("summary").unwrap_or(&value);
+    let title = summary.get("title")?.as_str()?.trim();
+    let description = summary
+        .get("description")
+        .or_else(|| summary.get("content"))?
+        .as_str()?
+        .trim();
+    if title.is_empty() || description.is_empty() {
+        return None;
+    }
+
+    Some(format!("# {title}\n\n{description}"))
+}
+
+fn escape_json_string_controls(text: &str) -> String {
+    let mut escaped_text = String::with_capacity(text.len());
+    let mut in_string = false;
+    let mut escaped = false;
+
+    for character in text.chars() {
+        if in_string {
+            if escaped {
+                escaped_text.push(character);
+                escaped = false;
+            } else {
+                match character {
+                    '\\' => {
+                        escaped_text.push(character);
+                        escaped = true;
+                    }
+                    '"' => {
+                        escaped_text.push(character);
+                        in_string = false;
+                    }
+                    '\n' => escaped_text.push_str("\\n"),
+                    '\r' => escaped_text.push_str("\\r"),
+                    '\t' => escaped_text.push_str("\\t"),
+                    control if control <= '\u{1f}' => {
+                        escaped_text.push_str(&format!("\\u{:04x}", control as u32));
+                    }
+                    _ => escaped_text.push(character),
+                }
+            }
+        } else {
+            if character == '"' {
+                in_string = true;
+            }
+            escaped_text.push(character);
+        }
+    }
+
+    escaped_text
+}
+
 pub struct Agent {
     provider: Arc<dyn LLMProvider>,
     pub model: String,
@@ -1257,6 +1440,7 @@ impl Agent {
             - Use `search_code` & `search_symbol` (cix engine) to locate functions/symbols.\n\
             - **Token-Efficient Reading**: Use `search_symbol` then `read_file` with line ranges (`start_line`, `end_line`). Max tool output is 8,000 chars.\n\
             - **Rune Notes & Skills**: For specific tasks or domain workflows, check available skills above and load full instructions via `read_rune_note` (e.g. `skills/release-verification.md`) or `search_notes`. For broad topics, start with `overview.md`. Use `recall_related_notes` with a relevant note's relative path to prioritize neighboring notes by wiki links, tags, keywords, and memory file relations; read only useful results. Upsert knowledge notes using `upsert_rune_note`.\n\
+            - **Note Upserts**: When asked to create or update a Rune note, call `upsert_rune_note` rather than giving instructions. Its `content` must be the full note as a plain Markdown string, never a JSON object or schema. For a Rune repository overview, first inspect `README.md` with `read_file`, then summarize only verified features and tools from the repository. Never invent languages, tools, or URLs. Verify the saved note with `read_rune_note`.\n\
             - **Memory**: Check past fixes with `recall_memory`, record successes with `add_fix`.\n\
             - **Tools**: Prefer `patch_file` over `write_file`. Avoid endless read loops; take action promptly."
         );
@@ -1692,7 +1876,7 @@ impl Agent {
 
     fn is_read_only_tool(&self, name: &str) -> bool {
         if let Some(tool) = self.dynamic_tools.get(name) {
-            return !tool.is_destructive();
+            return tool.is_read_only();
         }
         let out = matches!(
             name,
@@ -2147,6 +2331,22 @@ mod tests {
     }
 
     #[test]
+    fn dynamic_mutating_tools_are_not_classified_as_read_only() {
+        let workspace = tempfile::tempdir().unwrap();
+        let provider: Arc<dyn LLMProvider> = Arc::new(InterruptedProvider);
+        let agent = Agent::with_provider(
+            provider,
+            "test-model".into(),
+            workspace.path().to_path_buf(),
+        )
+        .with_tool(Arc::new(crate::notes_tools::UpsertRuneNoteTool))
+        .with_tool(Arc::new(crate::notes_tools::ReadRuneNoteTool));
+
+        assert!(!agent.is_read_only_tool("upsert_rune_note"));
+        assert!(agent.is_read_only_tool("read_rune_note"));
+    }
+
+    #[test]
     fn project_map_is_capped_without_splitting_utf8() {
         let map = format!("{}{}", "a".repeat(MAX_PROJECT_MAP_CHARS - 1), "🌒");
         let truncated = truncate_project_map(map);
@@ -2334,6 +2534,92 @@ mod tests {
 
         assert_eq!(provider.inner.base_url, "https://openrouter.ai/api/v1");
         assert_eq!(provider.inner.model, "openai/gpt-4o-mini");
+    }
+
+    #[test]
+    fn ollama_provider_uses_openai_compatible_endpoint() {
+        let provider = OllamaProvider::new("http://localhost:11434/", "llama3".into());
+        assert_eq!(provider.inner.base_url, "http://localhost:11434/v1");
+
+        let provider = OllamaProvider::new("http://localhost:11434/v1", "llama3".into());
+        assert_eq!(provider.inner.base_url, "http://localhost:11434/v1");
+    }
+
+    #[test]
+    fn ollama_textual_tool_call_is_parsed_only_for_declared_tools() {
+        let tools = vec![
+            FunctionDeclaration {
+                name: "list_files".into(),
+                description: "List files".into(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": { "path": { "type": "string" } }
+                }),
+            },
+            FunctionDeclaration {
+                name: "upsert_rune_note".into(),
+                description: "Create or update a rune-note.".into(),
+                parameters: serde_json::json!({
+                    "type": "OBJECT",
+                    "properties": {
+                        "note_path": { "type": "STRING" },
+                        "content": { "type": "STRING" }
+                    }
+                }),
+            },
+        ];
+
+        let call = parse_ollama_tool_call(
+            "```json\n{\"name\":\"list_files\",\"arguments\":{\"path\":\".\"}}\n```",
+            &tools,
+        )
+        .unwrap();
+        assert_eq!(call.name, "list_files");
+        assert_eq!(call.args, serde_json::json!({ "path": "." }));
+        let call = parse_ollama_tool_call(
+            "```json\n{\n  \"name\": \"upsert_rune_note\",\n  \"arguments\": {\n    \"note_path\": \"overview.md\",\n    \"content\": \"# Rune Overview\n\nRune is a coding assistant.\"\n  }\n}\n```",
+            &tools,
+        )
+        .unwrap();
+        assert_eq!(
+            call.args["content"],
+            "# Rune Overview\n\nRune is a coding assistant."
+        );
+        let call = parse_ollama_tool_call(
+            r#"{"name":"list_files","arguments":{"path":{"type":"string","description":"."}}}"#,
+            &tools,
+        )
+        .unwrap();
+        assert_eq!(call.args, serde_json::json!({ "path": "." }));
+        let call = parse_ollama_tool_call(
+            r###"{"name":"upsert_rune_note","arguments":{"note_path":"overview.md","content":{"type":"string","description":"## Overview of Rune\n\nA high-level overview."}}}"###,
+            &tools,
+        )
+        .unwrap();
+        assert_eq!(
+            call.args,
+            serde_json::json!({
+                "note_path": "overview.md",
+                "content": "## Overview of Rune\n\nA high-level overview."
+            })
+        );
+        let call = parse_ollama_tool_call(
+            r###"{"name":"upsert_rune_note","arguments":{"note_path":"overview.md","content":"{\"summary\":{\"title\":\"Welcome to Rune\",\"description\":\"A high-level overview of Rune and its tools.\"}}"}}"###,
+            &tools,
+        )
+        .unwrap();
+        assert_eq!(
+            call.args["content"],
+            "# Welcome to Rune\n\nA high-level overview of Rune and its tools."
+        );
+        assert!(
+            parse_ollama_tool_call(
+                r#"{"name":"execute_commands","arguments":{"cmd":"whoami"}}"#,
+                &tools
+            )
+            .is_none()
+        );
+        assert!(parse_ollama_tool_call("I cannot call tools.", &tools).is_none());
     }
 
     #[test]

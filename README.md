@@ -62,8 +62,9 @@ cargo install rune-code
 
 ### Configuration & Environment Management
 
-Rune supports configuring API keys, models, and local endpoints via a streamlined `rune.toml` configuration file in your project root or home directory, with full backward compatibility for environment variables (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `RUNE_*`). Groq and OpenRouter use their OpenAI-compatible chat-completions APIs.
+Rune supports configuring API keys, models, and local endpoints via a streamlined `rune.toml` configuration file in your project root or home directory, with full backward compatibility for environment variables (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `RUNE_*`). Groq, OpenRouter, and Ollama use OpenAI-compatible chat-completions APIs.
 To use OpenRouter, set `provider = "openrouter"` and provide `openrouter_api_key` and `openrouter_model` in `rune.toml`, or set `OPENROUTER_API_KEY` and optionally `OPENROUTER_MODEL` in the environment.
+To use Ollama, start its local server, pull a model (for example, `ollama pull llama3`), and set `provider = "ollama"` with `ollama_model = "llama3"` in `rune.toml`. Rune connects to Ollama's OpenAI-compatible `/v1` endpoint using `ollama_base_url` (default: `http://localhost:11434`); the URL may include `/v1` or omit it.
 
 Gemini requests are paced to a minimum interval of 1 second by default. Set
 `gemini_min_request_interval_ms` in `rune.toml` (or `RUNE__GEMINI_MIN_REQUEST_INTERVAL_MS`)
