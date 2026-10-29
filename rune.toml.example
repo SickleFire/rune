@@ -22,6 +22,11 @@ groq_model = "openai/gpt-oss-120b"
 openrouter_model = "openai/gpt-4o-mini"
 anthropic_model = "claude-3-5-sonnet"
 
+# Paths excluded from Rune's built-in read-only file tools. Patterns are
+# case-insensitive; * and ? are wildcards. A pattern without / matches any
+# path component. Excluded files can still be edited by write/patch tools.
+# excluded_read_paths = [".env", ".env.*", "*.pem", "secrets/**"]
+
 # Local Endpoints (Ollama / LM Studio)
 ollama_base_url = "http://localhost:11434"
 ollama_model = "llama3"

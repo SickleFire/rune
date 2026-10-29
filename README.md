@@ -74,6 +74,19 @@ to adjust it. Rune estimates input tokens from the serialized request and report
 estimate is not Google's tokenizer, and TPM quotas vary by model and account tier. The limiter
 is shared by requests using the same Gemini provider instance, including retries and tool loops.
 
+To keep sensitive workspace files out of Rune's built-in read-only file tools, configure
+`excluded_read_paths` in `rune.toml`. For example:
+
+```toml
+excluded_read_paths = [".env", ".env.*", "*.pem", "secrets/**"]
+```
+
+Patterns are case-insensitive; `*` and `?` are wildcards, and a pattern without `/` matches
+any path component. Exclusions apply to file reads, listings, code search, `@file` context,
+the project tree, and Git diffs. They block reads only; write and patch tools remain available.
+This is not a sandbox: shell commands and external or custom tools can still access excluded
+files.
+
 1. Copy the sample configuration file (or run the setup script):
    ```bash
    cp rune.toml.example rune.toml

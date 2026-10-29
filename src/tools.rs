@@ -23,6 +23,7 @@ pub struct ToolExecutor {
     workspace_root: PathBuf,
     last_checkpoint: Mutex<Option<String>>,
     restricted_patterns: Vec<String>,
+    excluded_read_paths: Vec<String>,
 }
 
 impl ToolExecutor {
@@ -37,7 +38,28 @@ impl ToolExecutor {
                 ".pem".to_string(),
                 "credentials".to_string(),
             ],
+            excluded_read_paths: Vec::new(),
         }
+    }
+
+    pub fn with_excluded_read_paths(mut self, paths: Vec<String>) -> Self {
+        self.excluded_read_paths = paths;
+        self
+    }
+
+    pub fn has_read_exclusions(&self) -> bool {
+        !self.excluded_read_paths.is_empty()
+    }
+
+    pub fn is_read_excluded(&self, path: &Path) -> bool {
+        let workspace = dunce::canonicalize(&self.workspace_root)
+            .unwrap_or_else(|_| self.workspace_root.clone());
+        let absolute = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            workspace.join(path)
+        };
+        path_matches_exclusions(&workspace, &absolute, &self.excluded_read_paths)
     }
 
     pub fn with_restricted_patterns(mut self, patterns: Vec<String>) -> Self {
@@ -57,6 +79,19 @@ impl ToolExecutor {
                     ),
                 ));
             }
+        }
+        Ok(())
+    }
+
+    fn check_read_exclusion(&self, path: &Path) -> io::Result<()> {
+        if self.is_read_excluded(path) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!(
+                    "Read access to '{}' is excluded by rune.toml.",
+                    path.display()
+                ),
+            ));
         }
         Ok(())
     }
@@ -155,6 +190,7 @@ impl ToolExecutor {
         end_line: Option<usize>,
     ) -> Result<String, std::io::Error> {
         let safe_path = self.sanitize_path(path)?;
+        self.check_read_exclusion(&safe_path)?;
         let content = tokio::fs::read_to_string(&safe_path).await?;
 
         if start_line.is_none() && end_line.is_none() {
@@ -334,10 +370,14 @@ impl ToolExecutor {
 
     pub async fn list_files(&self, path: &Path) -> Result<String, std::io::Error> {
         let safe_path = self.sanitize_path(path)?;
+        self.check_read_exclusion(&safe_path)?;
         let mut entries = tokio::fs::read_dir(safe_path).await?;
         let mut output = String::new();
 
         while let Some(entry) = entries.next_entry().await? {
+            if self.is_read_excluded(&entry.path()) {
+                continue;
+            }
             let file_name = entry.file_name();
             let string = &file_name.to_string_lossy();
             let file_type = entry.file_type().await?;
@@ -353,6 +393,11 @@ impl ToolExecutor {
 
     pub async fn search_code(&self, query: &str) -> Result<String, std::io::Error> {
         let canonical_workspace = dunce::canonicalize(&self.workspace_root)?;
+
+        if !self.excluded_read_paths.is_empty() {
+            return Self::fallback_search(&canonical_workspace, query, &self.excluded_read_paths)
+                .await;
+        }
 
         let cix_result = Command::new("cix")
             .current_dir(&canonical_workspace)
@@ -380,7 +425,7 @@ impl ToolExecutor {
                 }
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                Self::fallback_search(&canonical_workspace, query).await
+                Self::fallback_search(&canonical_workspace, query, &self.excluded_read_paths).await
             }
             Err(e) => Err(e),
         }
@@ -388,6 +433,11 @@ impl ToolExecutor {
 
     pub async fn search_symbol(&self, query: &str) -> Result<String, std::io::Error> {
         let canonical_workspace = dunce::canonicalize(&self.workspace_root)?;
+
+        if !self.excluded_read_paths.is_empty() {
+            return Self::fallback_search(&canonical_workspace, query, &self.excluded_read_paths)
+                .await;
+        }
 
         let cix_result = Command::new("cix")
             .current_dir(&canonical_workspace)
@@ -416,17 +466,19 @@ impl ToolExecutor {
                 }
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                Self::fallback_search(&canonical_workspace, query).await
+                Self::fallback_search(&canonical_workspace, query, &self.excluded_read_paths).await
             }
             Err(e) => Err(e),
         }
     }
 
-    async fn fallback_search(workspace_root: &Path, query: &str) -> Result<String, std::io::Error> {
+    async fn fallback_search(
+        workspace_root: &Path,
+        query: &str,
+        excluded_read_paths: &[String],
+    ) -> Result<String, std::io::Error> {
         let mut results = String::new();
-        results.push_str(
-            "[Note: 'cix' binary not found. Falling back to recursive workspace search]\n\n",
-        );
+        results.push_str("[Note: Using recursive workspace search instead of cix so excluded paths can be filtered, or because cix is unavailable]\n\n");
 
         let mut stack = vec![workspace_root.to_path_buf()];
         let query_lower = query.to_lowercase();
@@ -441,6 +493,9 @@ impl ToolExecutor {
 
             while let Some(entry) = entries.next_entry().await? {
                 let path = entry.path();
+                if path_matches_exclusions(workspace_root, &path, excluded_read_paths) {
+                    continue;
+                }
                 let file_name = entry.file_name();
                 let file_name_str = file_name.to_string_lossy();
 
@@ -593,11 +648,45 @@ impl ToolExecutor {
     }
 
     pub async fn git_diff(&self, path: Option<&str>) -> Result<String, std::io::Error> {
-        let cmd = match path {
-            Some(p) if !p.is_empty() => format!("git diff {}", p),
-            _ => "git diff".to_string(),
-        };
-        self.execute_commands(&cmd).await
+        let canonical_workspace = dunce::canonicalize(&self.workspace_root)?;
+        let mut command = Command::new("git");
+        command
+            .current_dir(&canonical_workspace)
+            .args(["diff", "--"]);
+
+        if let Some(path) = path.filter(|path| !path.is_empty()) {
+            let safe_path = self.sanitize_path(Path::new(path))?;
+            self.check_read_exclusion(&safe_path)?;
+            let relative = safe_path.strip_prefix(&canonical_workspace).map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "Git diff path is outside the workspace.",
+                )
+            })?;
+            command.arg(if relative.as_os_str().is_empty() {
+                Path::new(".")
+            } else {
+                relative
+            });
+        } else {
+            command.arg(".");
+        }
+
+        for pattern in &self.excluded_read_paths {
+            let pattern = normalize_path(Path::new(pattern));
+            if !pattern.is_empty() {
+                command.arg(format!(":(exclude,glob){pattern}"));
+            }
+        }
+
+        let output = command.output().await?;
+        if !output.status.success() {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            ));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
     pub async fn git_commit(&self, message: &str) -> Result<String, std::io::Error> {
@@ -744,6 +833,90 @@ impl ToolExecutor {
     }
 }
 
+fn normalize_path(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('\\', "/")
+        .trim_matches('/')
+        .to_lowercase()
+}
+
+fn wildcard_matches(pattern: &str, value: &str) -> bool {
+    let pattern = pattern.to_lowercase();
+    let value = value.to_lowercase();
+    let pattern: Vec<char> = pattern.chars().collect();
+    let value: Vec<char> = value.chars().collect();
+    let mut previous = vec![false; value.len() + 1];
+    previous[0] = true;
+
+    for token in pattern {
+        let mut current = vec![false; value.len() + 1];
+        match token {
+            '*' => {
+                current[0] = previous[0];
+                for index in 1..=value.len() {
+                    current[index] = previous[index] || current[index - 1];
+                }
+            }
+            '?' => {
+                for index in 1..=value.len() {
+                    current[index] = previous[index - 1];
+                }
+            }
+            character => {
+                for index in 1..=value.len() {
+                    current[index] = previous[index - 1] && character == value[index - 1];
+                }
+            }
+        }
+        previous = current;
+    }
+    previous[value.len()]
+}
+
+fn path_matches_exclusions(root: &Path, path: &Path, patterns: &[String]) -> bool {
+    if patterns.is_empty() {
+        return false;
+    }
+    path_matches_exclusions_lexically(root, path, patterns)
+        || dunce::canonicalize(path)
+            .ok()
+            .is_some_and(|resolved| path_matches_exclusions_lexically(root, &resolved, patterns))
+}
+
+fn path_matches_exclusions_lexically(root: &Path, path: &Path, patterns: &[String]) -> bool {
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    let normalized_path = normalize_path(relative);
+    let components: Vec<&str> = normalized_path.split('/').collect();
+
+    patterns.iter().any(|pattern| {
+        let pattern = normalize_path(Path::new(pattern));
+        if pattern.is_empty() {
+            return false;
+        }
+        let patterns = pattern
+            .strip_prefix("**/")
+            .map(|stripped| vec![pattern.as_str(), stripped])
+            .unwrap_or_else(|| vec![pattern.as_str()]);
+
+        patterns.iter().any(|pattern| {
+            let with_directory_slash = format!("{normalized_path}/");
+            wildcard_matches(pattern, &normalized_path)
+                || wildcard_matches(pattern, &with_directory_slash)
+                || normalized_path
+                    .split('/')
+                    .skip(1)
+                    .any(|suffix| wildcard_matches(pattern, suffix))
+                || normalized_path
+                    .split('/')
+                    .any(|component| wildcard_matches(pattern, component))
+                || (!pattern.contains('/')
+                    && components
+                        .iter()
+                        .any(|component| wildcard_matches(pattern, component)))
+        })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -810,6 +983,95 @@ mod tests {
         assert!(res.contains("4 | Line 4"));
         assert!(!res.contains("1 | Line 1"));
         assert!(!res.contains("5 | Line 5"));
+    }
+
+    #[tokio::test]
+    async fn test_excluded_read_paths_block_reads_and_hide_listing_entries() {
+        let dir = tempdir().unwrap();
+        tokio::fs::write(dir.path().join("private.env"), "secret material")
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("public.txt"), "public content")
+            .await
+            .unwrap();
+
+        let executor = ToolExecutor::new(dir.path().to_path_buf())
+            .with_excluded_read_paths(vec!["*.env".to_string()]);
+
+        let read_result = executor
+            .read_file(Path::new("private.env"), None, None)
+            .await;
+        assert_eq!(
+            read_result.unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+
+        let listing = executor.list_files(Path::new(".")).await.unwrap();
+        assert!(!listing.contains("private.env"));
+        assert!(listing.contains("public.txt"));
+    }
+
+    #[tokio::test]
+    async fn test_excluded_read_paths_apply_to_search() {
+        let dir = tempdir().unwrap();
+        tokio::fs::write(dir.path().join("private.env"), "distinctive secret phrase")
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("public.txt"), "distinctive public phrase")
+            .await
+            .unwrap();
+
+        let executor = ToolExecutor::new(dir.path().to_path_buf())
+            .with_excluded_read_paths(vec!["*.env".to_string()]);
+        let results = executor.search_code("distinctive").await.unwrap();
+
+        assert!(!results.contains("private.env"));
+        assert!(!results.contains("secret phrase"));
+        assert!(results.contains("public.txt"));
+        assert!(results.contains("public phrase"));
+    }
+
+    #[tokio::test]
+    async fn test_excluded_read_paths_apply_to_git_diff() {
+        let dir = tempdir().unwrap();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .current_dir(dir.path())
+                .args(args)
+                .output()
+                .unwrap()
+        };
+        assert!(git(&["init", "-q"]).status.success());
+        assert!(
+            git(&["config", "user.email", "test@example.com"])
+                .status
+                .success()
+        );
+        assert!(git(&["config", "user.name", "Rune Test"]).status.success());
+
+        tokio::fs::write(dir.path().join("private.txt"), "initial private content")
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("public.txt"), "initial public content")
+            .await
+            .unwrap();
+        assert!(git(&["add", "."]).status.success());
+        assert!(git(&["commit", "-m", "initial"]).status.success());
+        tokio::fs::write(dir.path().join("private.txt"), "changed private content")
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("public.txt"), "changed public content")
+            .await
+            .unwrap();
+
+        let executor = ToolExecutor::new(dir.path().to_path_buf())
+            .with_excluded_read_paths(vec!["private.txt".to_string()]);
+        let diff = executor.git_diff(None).await.unwrap();
+
+        assert!(!diff.contains("private.txt"));
+        assert!(!diff.contains("private content"));
+        assert!(diff.contains("public.txt"));
+        assert!(diff.contains("changed public content"));
     }
 
     #[tokio::test]

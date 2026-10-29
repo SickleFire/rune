@@ -1047,11 +1047,21 @@ impl Agent {
         model: String,
         workspace_root: PathBuf,
     ) -> Self {
+        Self::with_provider_and_read_exclusions(provider, model, workspace_root, Vec::new())
+    }
+
+    pub fn with_provider_and_read_exclusions(
+        provider: Arc<dyn LLMProvider>,
+        model: String,
+        workspace_root: PathBuf,
+        excluded_read_paths: Vec<String>,
+    ) -> Self {
         let mut agent = Self {
             provider,
             model,
             history: Vec::new(),
-            executor: ToolExecutor::new(workspace_root.clone()),
+            executor: ToolExecutor::new(workspace_root.clone())
+                .with_excluded_read_paths(excluded_read_paths),
             tools: get_tool_declarations(),
             dynamic_tools: HashMap::new(),
             workspace_root,
@@ -1181,7 +1191,7 @@ impl Agent {
                 }
             }
 
-            if let Some(md_file) = md_path {
+            if let Some(md_file) = md_path.filter(|path| !self.executor.is_read_excluded(path)) {
                 if let Ok(content) = std::fs::read_to_string(&md_file) {
                     let mut title = md_file
                         .parent()
@@ -1274,6 +1284,12 @@ impl Agent {
     fn initialize_system_context(&mut self) {
         let project_map = truncate_project_map(self.build_project_map(&self.workspace_root, ""));
         let skills_summary = self.load_skills_summary();
+        let read_exclusion_guidance = if self.executor.has_read_exclusions() {
+            "- **File read exclusions**: Some workspace paths are blocked from file-reading tools. Never try to access blocked files through shell commands or other tools.\n\
+            "
+        } else {
+            ""
+        };
         let system_prompt = format!(
             "You are Rune, an expert AI coding assistant.\n\
             \n\
@@ -1281,6 +1297,7 @@ impl Agent {
             {project_map}\n\
             {skills_summary}\n\
             ## Guidelines:\n\
+            {read_exclusion_guidance}\
             - Use `@filename` to read specific files into context.\n\
             - Use `search_code` & `search_symbol` (cix engine) to locate functions/symbols.\n\
             - **Token-Efficient Reading**: Use `search_symbol` then `read_file` with line ranges (`start_line`, `end_line`). Max tool output is 8,000 chars.\n\
@@ -1327,6 +1344,10 @@ impl Agent {
                 let s = name.to_string_lossy();
                 let path = e.path();
                 let is_dir = e.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+
+                if self.executor.is_read_excluded(&path) {
+                    return false;
+                }
 
                 // Exclude "skills" directory when inside ".rune"
                 if is_dir && s == "skills" {

@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 struct RuneCodeHelper {
     hinter: HistoryHinter,
+    tool_executor: rune_code::tools::ToolExecutor,
 }
 
 impl Hinter for RuneCodeHelper {
@@ -75,7 +76,7 @@ impl Completer for RuneCodeHelper {
             let mut pairs = Vec::new();
 
             if let Ok(workspace) = std::env::current_dir() {
-                collect_file_candidates(&workspace, prefix, &mut pairs);
+                collect_file_candidates(&workspace, prefix, &mut pairs, &self.tool_executor);
             }
 
             return Ok((at_idx + 1, pairs));
@@ -87,7 +88,12 @@ impl Completer for RuneCodeHelper {
 
 impl rustyline::Helper for RuneCodeHelper {}
 
-fn collect_file_candidates(dir: &std::path::Path, prefix: &str, pairs: &mut Vec<Pair>) {
+fn collect_file_candidates(
+    dir: &std::path::Path,
+    prefix: &str,
+    pairs: &mut Vec<Pair>,
+    tool_executor: &rune_code::tools::ToolExecutor,
+) {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(_) => return,
@@ -104,8 +110,12 @@ fn collect_file_candidates(dir: &std::path::Path, prefix: &str, pairs: &mut Vec<
             continue;
         }
 
+        if tool_executor.is_read_excluded(&path) {
+            continue;
+        }
+
         if path.is_dir() {
-            collect_file_candidates(&path, prefix, pairs);
+            collect_file_candidates(&path, prefix, pairs, tool_executor);
         } else if path.is_file() {
             if let Ok(rel_path) = path.strip_prefix(std::env::current_dir().unwrap_or_default()) {
                 let rel_str = rel_path.to_string_lossy().replace('\\', "/");
@@ -350,9 +360,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    let mut orchestrator =
-        MultiAgentOrchestrator::new(default_provider, workspace_root.clone(), multi_config)
-            .expect("Failed to initialize multi-agent orchestrator");
+    let mut orchestrator = MultiAgentOrchestrator::new_with_read_exclusions(
+        Arc::clone(&default_provider),
+        workspace_root.clone(),
+        multi_config,
+        config.excluded_read_paths.clone(),
+    )
+    .expect("Failed to initialize multi-agent orchestrator");
 
     if multi_agent_mode {
         println!(
@@ -559,6 +573,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut rl = Editor::new()?;
     rl.set_helper(Some(RuneCodeHelper {
         hinter: HistoryHinter::new(),
+        tool_executor: rune_code::tools::ToolExecutor::new(workspace_root.clone())
+            .with_excluded_read_paths(config.excluded_read_paths.clone()),
     }));
     let history_file = env::temp_dir().join(".rune_history");
     let _ = rl.load_history(&history_file);
@@ -638,10 +654,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
 
                 if prompt.eq_ignore_ascii_case("/files") || prompt.eq_ignore_ascii_case("/tree") {
-                    let agent = rune_code::api::Agent::new_gemini(
-                        env::var("GEMINI_API_KEY").unwrap_or_default(),
-                        workspace_root.clone(),
+                    let agent = rune_code::api::Agent::with_provider_and_read_exclusions(
+                        Arc::clone(&default_provider),
                         gemini_model.clone(),
+                        workspace_root.clone(),
+                        config.excluded_read_paths.clone(),
                     );
                     let map = agent.build_project_map(&workspace_root, "");
                     println!("{}", "=== Repository File Tree ===".cyan().bold());

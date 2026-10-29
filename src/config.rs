@@ -26,6 +26,8 @@ pub struct RuneConfig {
     pub architect_model: Option<String>,
     pub coder_model: Option<String>,
     pub mysql_url: Option<String>,
+    #[serde(default)]
+    pub excluded_read_paths: Vec<String>,
 }
 
 impl Default for RuneConfig {
@@ -57,6 +59,7 @@ impl Default for RuneConfig {
             architect_model: None,
             coder_model: None,
             mysql_url: None,
+            excluded_read_paths: Vec::new(),
         }
     }
 }

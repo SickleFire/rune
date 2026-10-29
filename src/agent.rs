@@ -66,13 +66,23 @@ impl MultiAgentOrchestrator {
         workspace_root: PathBuf,
         config: MultiAgentConfig,
     ) -> Result<Self, String> {
+        Self::new_with_read_exclusions(provider, workspace_root, config, Vec::new())
+    }
+
+    pub fn new_with_read_exclusions(
+        provider: Arc<dyn LLMProvider>,
+        workspace_root: PathBuf,
+        config: MultiAgentConfig,
+        excluded_read_paths: Vec<String>,
+    ) -> Result<Self, String> {
         config.validate()?;
         let mut agents = Vec::new();
         for agent_cfg in &config.agents {
-            let mut agent = Agent::with_provider(
+            let mut agent = Agent::with_provider_and_read_exclusions(
                 Arc::clone(&provider),
                 agent_cfg.model.clone(),
                 workspace_root.clone(),
+                excluded_read_paths.clone(),
             );
 
             if agent_cfg.role == AgentRole::Architect {
