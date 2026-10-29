@@ -158,12 +158,14 @@ On first use, inspect the script and explicitly approve its current contents in 
 ```
 
 Changed scripts require approval again. `/automations` lists configured automations,
-`/automation run workspace-brief` runs an enabled automation on demand, and
-`/automation revoke workspace-brief` removes its approval. Startup automations run before
-the prompt only when enabled and approved. Successful non-empty output is available to
-the agent as untrusted data; asking the agent to interpret it uses LLM tokens, but running
-the script itself does not. Output is capped per stream and execution is stopped at the
-configured timeout. Failed runs are reported and their output is not added to agent context.
+`/automation run morning-brief` runs an enabled automation on demand, and
+`/automation revoke morning-brief` removes its approval. Startup automations run before
+the prompt only when enabled and approved. By default, output is printed in the terminal
+and is not sent to the agent, so it adds no tokens to later LLM requests. If you want Rune
+to interpret an automation result, run it with `/automation run morning-brief --context`;
+Rune will include that output in the next agent request only, where it uses input tokens.
+Output is capped per stream and execution is stopped at the configured timeout. Failed
+runs are reported and their output is not added to agent context.
 
 Automations are not sandboxed: Python code has the permissions of the Rune process,
 including access to local files, credentials, and network resources. Approval is bound to

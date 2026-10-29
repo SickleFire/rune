@@ -570,7 +570,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
             ))
     }
 
-    let mut startup_automation_results = Vec::new();
     for automation in config.automations.iter().filter(|automation| {
         automation.enabled
             && automation.trigger == rune_code::automation::AutomationTrigger::Startup
@@ -616,7 +615,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 .red()
                             );
                         }
-                        startup_automation_results.push(result);
                     }
                     Err(error) => {
                         eprintln!("{}", format!("Automation failed: {error}").red());
@@ -637,12 +635,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
             ),
         }
     }
-    if let Some(context) = rune_code::automation::automation_context(&startup_automation_results) {
-        orchestrator.inject_context_on_all(context);
-    }
-
     let mut auto_approve = false;
     let mut plan_mode = false;
+    let mut pending_automation_context: Option<String> = None;
     let mut rl = Editor::new()?;
     rl.set_helper(Some(RuneCodeHelper {
         hinter: HistoryHinter::new(),
@@ -720,6 +715,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     let mut parts = rest.split_whitespace();
                     let action = parts.next().unwrap_or("");
                     let name = parts.next().unwrap_or("");
+                    let include_context = parts.any(|part| part == "--context");
                     let automation = config
                         .automations
                         .iter()
@@ -782,10 +778,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                 "Automation output was truncated by Rune.".yellow()
                                             );
                                         }
-                                        if let Some(context) =
-                                            rune_code::automation::automation_context(&[result])
-                                        {
-                                            orchestrator.inject_context_on_all(context);
+                                        if include_context {
+                                            pending_automation_context =
+                                                rune_code::automation::automation_context(&[
+                                                    result,
+                                                ]);
+                                            if pending_automation_context.is_some() {
+                                                println!(
+                                                    "{}",
+                                                    "Output will be included in the next agent request only."
+                                                        .yellow()
+                                                );
+                                            } else {
+                                                println!(
+                                                    "{}",
+                                                    "This automation produced no context output."
+                                                        .yellow()
+                                                );
+                                            }
                                         }
                                     } else {
                                         eprintln!(
@@ -812,7 +822,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             format!("No automation named '{name}' is configured.").red()
                         ),
                         _ => println!(
-                            "Usage: /automation <run|approve|revoke> <name>  |  /automations"
+                            "Usage: /automation run <name> [--context] | approve|revoke <name> | /automations"
                         ),
                     }
                     continue;
@@ -1687,8 +1697,14 @@ coder_model = "gpt-5.6-luna"
 
                 let _ = rl.add_history_entry(prompt);
 
+                let automation_context = pending_automation_context.take();
                 orchestrator
-                    .run_workflow(prompt, auto_approve, plan_mode)
+                    .run_workflow_with_context(
+                        prompt,
+                        auto_approve,
+                        plan_mode,
+                        automation_context.as_deref(),
+                    )
                     .await;
                 println!();
             }

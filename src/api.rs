@@ -14,6 +14,19 @@ use tokio::task;
 const MAX_PROJECT_MAP_CHARS: usize = 1_000;
 const MAX_TOOL_RESULT_CHARS: usize = 8_000;
 
+fn contextualized_request_history(
+    history: &[CanonicalMessage],
+    user_index: usize,
+    context: &str,
+) -> Vec<CanonicalMessage> {
+    let mut request_history = history.to_vec();
+    if let Some(CanonicalMessage::User(prompt)) = request_history.get_mut(user_index) {
+        prompt.push_str("\n\n");
+        prompt.push_str(context);
+    }
+    request_history
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum CanonicalMessage {
     User(String),
@@ -1464,6 +1477,17 @@ impl Agent {
     }
 
     pub async fn run_with_mode(&mut self, raw_prompt: &str, auto_approve: bool, plan_mode: bool) {
+        self.run_with_mode_and_context(raw_prompt, auto_approve, plan_mode, None)
+            .await;
+    }
+
+    pub async fn run_with_mode_and_context(
+        &mut self,
+        raw_prompt: &str,
+        auto_approve: bool,
+        plan_mode: bool,
+        additional_context: Option<&str>,
+    ) {
         // Compact history at complete-turn boundaries when it grows beyond 20,000 characters.
         let (_, chars) = self.get_history_stats();
         if chars > 20000 {
@@ -1476,6 +1500,7 @@ impl Agent {
 
         let processed = self.resolve_mentions(raw_prompt).await;
         self.history.push(CanonicalMessage::User(processed));
+        let context_user_index = self.history.len() - 1;
 
         let mut tool_steps = 0;
         let max_tool_steps = 50;
@@ -1483,16 +1508,27 @@ impl Agent {
         loop {
             let streamed_text = Arc::new(Mutex::new(String::new()));
             let streamed_text_for_callback = Arc::clone(&streamed_text);
+            let request_history = additional_context.map_or_else(
+                || self.history.clone(),
+                |context| {
+                    contextualized_request_history(&self.history, context_user_index, context)
+                },
+            );
             let result = self
                 .provider
-                .complete(&self.history, &self.tools, &self.model, &|text: String| {
-                    print!("{text}");
-                    let _ = std::io::stdout().flush();
-                    streamed_text_for_callback
-                        .lock()
-                        .expect("streamed response lock poisoned")
-                        .push_str(&text);
-                })
+                .complete(
+                    &request_history,
+                    &self.tools,
+                    &self.model,
+                    &|text: String| {
+                        print!("{text}");
+                        let _ = std::io::stdout().flush();
+                        streamed_text_for_callback
+                            .lock()
+                            .expect("streamed response lock poisoned")
+                            .push_str(&text);
+                    },
+                )
                 .await;
 
             let ProviderResponse { text, tool_calls } = match result {
@@ -2171,6 +2207,21 @@ fn truncate_tool_result(result: &mut CanonicalToolResult) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn automation_context_is_only_added_to_the_request_copy() {
+        let history = vec![CanonicalMessage::User("summarize the result".into())];
+        let request = contextualized_request_history(&history, 0, "automation result");
+
+        assert!(matches!(
+            &request[0],
+            CanonicalMessage::User(prompt) if prompt.contains("automation result")
+        ));
+        assert!(matches!(
+            &history[0],
+            CanonicalMessage::User(prompt) if !prompt.contains("automation result")
+        ));
+    }
 
     struct InterruptedProvider;
 

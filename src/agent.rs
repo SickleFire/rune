@@ -114,9 +114,20 @@ impl MultiAgentOrchestrator {
     }
 
     pub async fn run_workflow(&mut self, prompt: &str, auto_approve: bool, plan_mode: bool) {
+        self.run_workflow_with_context(prompt, auto_approve, plan_mode, None)
+            .await;
+    }
+
+    pub async fn run_workflow_with_context(
+        &mut self,
+        prompt: &str,
+        auto_approve: bool,
+        plan_mode: bool,
+        additional_context: Option<&str>,
+    ) {
         if self.agents.len() == 1 {
             self.agents[0]
-                .run_with_mode(prompt, auto_approve, plan_mode)
+                .run_with_mode_and_context(prompt, auto_approve, plan_mode, additional_context)
                 .await;
             return;
         }
@@ -128,7 +139,9 @@ impl MultiAgentOrchestrator {
                 .bold()
         );
 
-        self.agents[0].run_with_mode(prompt, true, true).await;
+        self.agents[0]
+            .run_with_mode_and_context(prompt, true, true, additional_context)
+            .await;
 
         let architect_plan = self.agents[0]
             .get_last_assistant_text()
@@ -145,7 +158,7 @@ impl MultiAgentOrchestrator {
         );
 
         self.agents[1]
-            .run_with_mode(&coder_prompt, auto_approve, plan_mode)
+            .run_with_mode_and_context(&coder_prompt, auto_approve, plan_mode, additional_context)
             .await;
     }
 
@@ -156,12 +169,6 @@ impl MultiAgentOrchestrator {
             .map(|agent| agent.with_tool(Arc::clone(&tool)))
             .collect();
         self
-    }
-
-    pub fn inject_context_on_all(&mut self, context: String) {
-        for agent in &mut self.agents {
-            agent.inject_custom_system_context(context.clone());
-        }
     }
 
     pub fn set_model_all(&mut self, model: String) {
