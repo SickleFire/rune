@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::task;
 
-const MAX_PROJECT_MAP_CHARS: usize = 3_000;
+const MAX_PROJECT_MAP_CHARS: usize = 1_000;
 const MAX_TOOL_RESULT_CHARS: usize = 8_000;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -1297,7 +1297,17 @@ impl Agent {
             .filter(|e| {
                 let name = e.file_name();
                 let s = name.to_string_lossy();
+                let path = e.path();
                 let is_dir = e.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+                
+                // Exclude "skills" directory when inside ".rune"
+                if is_dir && s == "skills" {
+                    let path_str = path.to_string_lossy();
+                    if path_str.contains(".rune") || path_str.contains(".rune\\") || path_str.contains(".rune/") {
+                        return false;
+                    }
+                }
+
                 !(is_dir
                     && matches!(
                         s.as_ref(),
