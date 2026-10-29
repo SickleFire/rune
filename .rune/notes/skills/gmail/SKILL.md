@@ -2,6 +2,10 @@
 name: gmail
 description: Guides Rune in designing, implementing, authenticating, and interacting with the Gmail API (REST, OAuth 2.0, messages, threads, drafts, labels, and push notifications) for automation and email management skills. Use whenever tasked with creating Gmail API clients, sending/reading emails via Gmail REST API, handling OAuth credentials, or building email workflow automation.
 compatibility: Requires Python 3.x / Node.js / Go / Java (depending on client implementation), Google Cloud project credentials, and Gmail API enabled.
+scripts:
+  - scripts/read_emails.py
+  - scripts/send_email.py
+  - scripts/manage_labels.py
 ---
 
 # Gmail API Integration Skill
@@ -108,3 +112,26 @@ def send_message(service, sender, to, subject, body_text, user_id='me'):
 - Verify OAuth authentication token generation.
 - Test query filters (e.g. `subject:"Invoice"`, `has:attachment`).
 - Test batch operations and error handling (handling HTTP 429 Rate Limit Exceeded with exponential backoff).
+
+---
+
+## Included Companion Scripts
+
+The skill includes pre-built Python scripts under `scripts/` for common Gmail tasks:
+
+1. **`scripts/read_emails.py`**
+   - **Scope**: `https://www.googleapis.com/auth/gmail.readonly`
+   - **Usage**: `python .rune/notes/skills/gmail/scripts/read_emails.py`
+   - **Description**: Authenticates with OAuth2 (`credentials.json` -> `token.json`), queries and fetches recent messages (with subject, sender, date, snippet, and message ID).
+
+2. **`scripts/send_email.py`**
+   - **Scope**: `https://www.googleapis.com/auth/gmail.send`
+   - **Usage**: `python .rune/notes/skills/gmail/scripts/send_email.py <to> <subject> <body>`
+   - **Description**: Constructs an `EmailMessage`, base64url encodes it, and sends it via the Gmail API (`users.messages.send`).
+
+3. **`scripts/manage_labels.py`**
+   - **Scope**: `https://www.googleapis.com/auth/gmail.modify`
+   - **Usage**: 
+     - List labels: `python .rune/notes/skills/gmail/scripts/manage_labels.py list`
+     - Modify labels: `python .rune/notes/skills/gmail/scripts/manage_labels.py modify <msg_id> --add <label_id> --remove <label_id>`
+   - **Description**: Lists all user and system Gmail labels or modifies message labels (adding/removing tags like `UNREAD`, `INBOX`, or custom label IDs).
