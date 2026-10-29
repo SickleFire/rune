@@ -91,7 +91,10 @@ mod tests {
         let _env = TestEnv::new();
         let mut store = MemoryStore::default();
         store
-            .add_fix("error[E0308]: mismatched types", "convert i32 to u32 using as u32")
+            .add_fix(
+                "error[E0308]: mismatched types",
+                "convert i32 to u32 using as u32",
+            )
             .unwrap();
 
         let loaded = MemoryStore::load();

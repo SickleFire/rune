@@ -277,7 +277,8 @@ mod tests {
             "test-key".into(),
             "test-model".into(),
         ));
-        let mut orchestrator = MultiAgentOrchestrator::new(provider, std::path::PathBuf::from("."), config).unwrap();
+        let mut orchestrator =
+            MultiAgentOrchestrator::new(provider, std::path::PathBuf::from("."), config).unwrap();
         let summary = orchestrator.get_active_models_summary();
         assert!(summary.contains("Architect"));
         assert!(summary.contains("gemini-pro"));

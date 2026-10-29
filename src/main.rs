@@ -165,15 +165,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
     {
         if config.enable_gemini_cascade {
             let cascade_models = config.gemini_cascade_models.clone().unwrap_or_else(|| {
-                vec![gemini_model.clone(), "gemini-3.8-flash".to_string(), "gemini-3.6-flash".to_string()]
+                vec![
+                    gemini_model.clone(),
+                    "gemini-3.8-flash".to_string(),
+                    "gemini-3.6-flash".to_string(),
+                ]
             });
-            println!("[Rune: Using Gemini Cascading Provider with models: {:?}]", cascade_models);
+            println!(
+                "[Rune: Using Gemini Cascading Provider with models: {:?}]",
+                cascade_models
+            );
             Arc::new(
-                rune_code::api::GeminiCascadingProvider::new(gemini_api_key.clone(), cascade_models)
-                    .with_request_limits(
-                        std::time::Duration::from_millis(config.gemini_min_request_interval_ms),
-                        config.gemini_max_input_tokens_per_minute,
-                    ),
+                rune_code::api::GeminiCascadingProvider::new(
+                    gemini_api_key.clone(),
+                    cascade_models,
+                )
+                .with_request_limits(
+                    std::time::Duration::from_millis(config.gemini_min_request_interval_ms),
+                    config.gemini_max_input_tokens_per_minute,
+                ),
             )
         } else {
             Arc::new(
@@ -243,14 +253,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
     } else if !gemini_api_key.is_empty() {
         if config.enable_gemini_cascade {
             let cascade_models = config.gemini_cascade_models.clone().unwrap_or_else(|| {
-                vec![gemini_model.clone(), "gemini-2.5-flash".to_string(), "gemini-3.5-flash-lite".to_string()]
+                vec![
+                    gemini_model.clone(),
+                    "gemini-2.5-flash".to_string(),
+                    "gemini-3.5-flash-lite".to_string(),
+                ]
             });
             Arc::new(
-                rune_code::api::GeminiCascadingProvider::new(gemini_api_key.clone(), cascade_models)
-                    .with_request_limits(
-                        std::time::Duration::from_millis(config.gemini_min_request_interval_ms),
-                        config.gemini_max_input_tokens_per_minute,
-                    ),
+                rune_code::api::GeminiCascadingProvider::new(
+                    gemini_api_key.clone(),
+                    cascade_models,
+                )
+                .with_request_limits(
+                    std::time::Duration::from_millis(config.gemini_min_request_interval_ms),
+                    config.gemini_max_input_tokens_per_minute,
+                ),
             )
         } else {
             Arc::new(
@@ -720,18 +737,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 let model =
                                     model_arg.clone().unwrap_or_else(|| gemini_model.clone());
                                 if config.enable_gemini_cascade {
-                                    let cascade_models = config.gemini_cascade_models.clone().unwrap_or_else(|| {
-                                        vec![model.clone(), "gemini-2.5-flash".to_string(), "gemini-3.5-flash-lite".to_string()]
-                                    });
+                                    let cascade_models =
+                                        config.gemini_cascade_models.clone().unwrap_or_else(|| {
+                                            vec![
+                                                model.clone(),
+                                                "gemini-2.5-flash".to_string(),
+                                                "gemini-3.5-flash-lite".to_string(),
+                                            ]
+                                        });
                                     (
                                         Arc::new(
-                                            rune_code::api::GeminiCascadingProvider::new(key, cascade_models)
-                                                .with_request_limits(
-                                                    std::time::Duration::from_millis(
-                                                        config.gemini_min_request_interval_ms,
-                                                    ),
-                                                    config.gemini_max_input_tokens_per_minute,
+                                            rune_code::api::GeminiCascadingProvider::new(
+                                                key,
+                                                cascade_models,
+                                            )
+                                            .with_request_limits(
+                                                std::time::Duration::from_millis(
+                                                    config.gemini_min_request_interval_ms,
                                                 ),
+                                                config.gemini_max_input_tokens_per_minute,
+                                            ),
                                         ),
                                         model,
                                     )

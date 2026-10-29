@@ -246,9 +246,11 @@ mod tests {
     #[test]
     fn test_rune_config_default() {
         let config = RuneConfig::default();
-        assert_eq!(config.gemini_model.as_deref(), Some("gemini-3.5-flash-lite"));
+        assert_eq!(
+            config.gemini_model.as_deref(),
+            Some("gemini-3.5-flash-lite")
+        );
         assert!(config.gemini_api_key.is_none());
         assert_eq!(config.gemini_min_request_interval_ms, 1000);
     }
 }
-

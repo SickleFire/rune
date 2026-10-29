@@ -137,7 +137,10 @@ pub struct GeminiCascadingProvider {
 
 impl GeminiCascadingProvider {
     pub fn new(api_key: String, models: Vec<String>) -> Self {
-        let _primary_model = models.first().cloned().unwrap_or_else(|| "gemini-3.5-flash-lite".to_string());
+        let _primary_model = models
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "gemini-3.5-flash-lite".to_string());
         Self {
             api_key,
             models,
@@ -399,12 +402,20 @@ impl LLMProvider for GeminiCascadingProvider {
                 ),
             };
 
-            println!("[Gemini Cascading] Attempting completion with model '{}' ({}/{})", model_name, idx + 1, models.len());
+            println!(
+                "[Gemini Cascading] Attempting completion with model '{}' ({}/{})",
+                model_name,
+                idx + 1,
+                models.len()
+            );
             match provider.complete(history, tools, model_name, on_text).await {
                 Ok(resp) => return Ok(resp),
                 Err(e) => {
                     let err_str = e.to_string();
-                    println!("[Gemini Cascading] Model '{}' failed: {}. Falling back...", model_name, err_str);
+                    println!(
+                        "[Gemini Cascading] Model '{}' failed: {}. Falling back...",
+                        model_name, err_str
+                    );
                     last_err = Some(e);
                 }
             }
@@ -1131,7 +1142,11 @@ impl Agent {
     }
 
     fn load_skills_summary(&self) -> String {
-        let skills_dir = self.workspace_root.join(".rune").join("notes").join("skills");
+        let skills_dir = self
+            .workspace_root
+            .join(".rune")
+            .join("notes")
+            .join("skills");
         if !skills_dir.exists() {
             return String::new();
         }
@@ -1168,12 +1183,13 @@ impl Agent {
 
             if let Some(md_file) = md_path {
                 if let Ok(content) = std::fs::read_to_string(&md_file) {
-                    let mut title = md_file.parent()
+                    let mut title = md_file
+                        .parent()
                         .and_then(|p| p.file_name())
                         .map(|s| s.to_string_lossy().to_string())
                         .unwrap_or_else(|| "unknown".to_string());
                     let mut description = String::new();
-                    
+
                     // Parse frontmatter
                     if content.starts_with("---") {
                         let rest = &content[3..];
@@ -1192,12 +1208,20 @@ impl Agent {
                     // Check for accompanying scripts in the skill folder or scripts/ subfolder (with recursive support)
                     let mut script_info = String::new();
                     if let Some(parent_dir) = md_file.parent() {
-                        let base_skills_dir = self.workspace_root.join(".rune").join("notes").join("skills");
+                        let base_skills_dir = self
+                            .workspace_root
+                            .join(".rune")
+                            .join("notes")
+                            .join("skills");
                         if parent_dir.is_dir() && parent_dir != base_skills_dir {
                             let mut all_scripts = Vec::new();
-                            
+
                             // Recursive helper to collect relative script paths
-                            fn collect_scripts(dir: &std::path::Path, base: &std::path::Path, list: &mut Vec<String>) {
+                            fn collect_scripts(
+                                dir: &std::path::Path,
+                                base: &std::path::Path,
+                                list: &mut Vec<String>,
+                            ) {
                                 if let Ok(entries) = std::fs::read_dir(dir) {
                                     for entry in entries.filter_map(|e| e.ok()) {
                                         let p = entry.path();
@@ -1206,8 +1230,10 @@ impl Agent {
                                         } else if p.is_file() {
                                             // Exclude the markdown file itself if it's in base
                                             if let Ok(rel) = p.strip_prefix(base) {
-                                                let rel_str = rel.to_string_lossy().replace('\\', "/");
-                                                if !rel_str.ends_with(".md") && !rel_str.is_empty() {
+                                                let rel_str =
+                                                    rel.to_string_lossy().replace('\\', "/");
+                                                if !rel_str.ends_with(".md") && !rel_str.is_empty()
+                                                {
                                                     list.push(rel_str);
                                                 }
                                             }
@@ -1227,7 +1253,9 @@ impl Agent {
                     if description.is_empty() {
                         lines.push(format!("- `{rel_note_path}` ({title}){script_info}"));
                     } else {
-                        lines.push(format!("- `{rel_note_path}`: {description} (Title: {title}){script_info}"));
+                        lines.push(format!(
+                            "- `{rel_note_path}`: {description} (Title: {title}){script_info}"
+                        ));
                     }
                 }
             }
@@ -1299,11 +1327,14 @@ impl Agent {
                 let s = name.to_string_lossy();
                 let path = e.path();
                 let is_dir = e.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
-                
+
                 // Exclude "skills" directory when inside ".rune"
                 if is_dir && s == "skills" {
                     let path_str = path.to_string_lossy();
-                    if path_str.contains(".rune") || path_str.contains(".rune\\") || path_str.contains(".rune/") {
+                    if path_str.contains(".rune")
+                        || path_str.contains(".rune\\")
+                        || path_str.contains(".rune/")
+                    {
                         return false;
                     }
                 }
