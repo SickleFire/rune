@@ -3,6 +3,7 @@
 [![CI](https://github.com/SickleFire/rune/actions/workflows/ci.yml/badge.svg)](https://github.com/SickleFire/rune/actions/workflows/ci.yml)
 [![Release](https://github.com/SickleFire/rune/actions/workflows/release.yml/badge.svg)](https://github.com/SickleFire/rune/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.md)
+[![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/SickleFire/badge.svg)](https://hub.xerj.org/contributors/SickleFire)
 
 Rune is an expert AI coding assistant integrated into a software development workspace, Unity, and Godot game development environments, built in Rust. It provides an interactive REPL/CLI interface, tool execution (file operations, command execution, git operations, code searching, Unity and Godot Editor integration, web utilities, persistent memory, and Rune Notes knowledge graph), and seamless API integration with LLM providers.
 
