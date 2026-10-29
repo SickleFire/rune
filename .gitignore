@@ -2,4 +2,6 @@
 credentials.json
 *.json
 token.json
+.rune/automation-approvals/
+.rune/automation-schedules/
 .env

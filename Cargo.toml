@@ -16,6 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 async-trait = "0.1.92"
+chrono = { version = "0.4", features = ["clock"] }
 dunce = "1.0.5"
 rustyline = "18.0.1"
 tokio = {version = "1.38", features = ["full"]}

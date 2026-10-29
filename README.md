@@ -143,7 +143,30 @@ automation_max_output_bytes = 8192
 name = "morning-brief"
 script = ".rune/automations/morning_brief.py"
 enabled = true
-trigger = "startup" # or "manual"
+trigger = "startup" # "manual", "interval", or "scheduled" are also supported
+```
+
+An interval automation runs repeatedly while Rune is open. Its first run is after the
+configured interval:
+
+```toml
+[[automations]]
+name = "refresh-status"
+script = ".rune/automations/refresh_status.py"
+enabled = true
+trigger = "interval"
+interval_seconds = 1800
+```
+
+A scheduled automation runs once per matching local time each day while Rune is open:
+
+```toml
+[[automations]]
+name = "daily-brief"
+script = ".rune/automations/morning_brief.py"
+enabled = true
+trigger = "scheduled"
+schedule_times = ["08:30", "13:00"] # 24-hour local time
 ```
 
 Set `python_interpreter` to the Python executable on your system (for example, `python3`
@@ -166,6 +189,32 @@ to interpret an automation result, run it with `/automation run morning-brief --
 Rune will include that output in the next agent request only, where it uses input tokens.
 Output is capped per stream and execution is stopped at the configured timeout. Failed
 runs are reported and their output is not added to agent context.
+
+By default, interval and scheduled triggers run only while the Rune process is open.
+On Windows, install an automation in Task Scheduler to keep it running while Rune is
+closed:
+
+```text
+/automation install-schedule morning-brief
+```
+
+This registers a task for the current Windows user without requiring administrator
+privileges or storing a password. It runs only while that user is logged on; Rune itself
+does not need to be open. Task Scheduler starts missed runs when available after sleep or
+shutdown. Use `/automation uninstall-schedule morning-brief` to remove the OS task and
+resume in-process scheduling while Rune is open. `/automations` shows whether an OS
+schedule is installed. Reinstall after changing the trigger settings or moving Rune's
+executable. The task runs with your logged-on account; if you sign out, it waits until you
+log back in. Scheduled-task output is not shown in the REPL, so have unattended scripts
+write their results to an appropriate file or notification if you need to review them.
+
+Interval runs wait the configured number of seconds before the first run and after each
+completion. Windows Task Scheduler installation requires intervals to be whole minutes
+(at least 60 seconds); the in-process scheduler also supports shorter intervals. Scheduled
+times use the computer's local clock and 24-hour `HH:MM` format. Task Scheduler prevents
+overlapping instances of the same automation. OS-scheduled runs invoke Rune's
+`--automation-run` command, which runs the script and exits without initializing an LLM
+provider or starting the REPL. Output is not sent to an LLM.
 
 Automations are not sandboxed: Python code has the permissions of the Rune process,
 including access to local files, credentials, and network resources. Approval is bound to

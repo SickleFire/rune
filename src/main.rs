@@ -136,9 +136,68 @@ fn collect_file_candidates(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let cli_args = env::args().skip(1).collect::<Vec<_>>();
+    if let Some(index) = cli_args.iter().position(|arg| arg == "--workspace") {
+        let workspace = cli_args.get(index + 1).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "--workspace requires a path.",
+            )
+        })?;
+        env::set_current_dir(workspace)?;
+    }
     let workspace_root = env::current_dir().expect("Failed to get current directory");
 
     let config = rune_code::config::RuneConfig::load();
+
+    if let Some(index) = cli_args.iter().position(|arg| arg == "--automation-run") {
+        let name = cli_args.get(index + 1).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "--automation-run requires an automation name.",
+            )
+        })?;
+        let automation = config
+            .automations
+            .iter()
+            .find(|automation| automation.name == *name)
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("No automation named '{name}' is configured."),
+                )
+            })?;
+        if !automation.enabled {
+            return Err(std::io::Error::other(format!(
+                "Automation '{name}' is disabled in rune.toml."
+            ))
+            .into());
+        }
+        let result = automation
+            .run(
+                &workspace_root,
+                &config.python_interpreter,
+                &config.python_args,
+                config.automation_timeout_seconds,
+                config.automation_max_output_bytes,
+            )
+            .await
+            .map_err(std::io::Error::other)?;
+        if !result.output.is_empty() {
+            println!("{}", result.output);
+        }
+        if result.truncated {
+            eprintln!("Automation output was truncated by Rune.");
+        }
+        if !result.success {
+            return Err(std::io::Error::other(format!(
+                "Automation '{}' exited unsuccessfully.",
+                result.name
+            ))
+            .into());
+        }
+        return Ok(());
+    }
 
     let gemini_api_key = config.gemini_api_key.clone().unwrap_or_default();
     let gemini_model = config
@@ -570,6 +629,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             ))
     }
 
+    let mut local_automation_schedulers = Vec::new();
     for automation in config.automations.iter().filter(|automation| {
         automation.enabled
             && automation.trigger == rune_code::automation::AutomationTrigger::Startup
@@ -635,6 +695,65 @@ async fn main() -> Result<(), Box<dyn Error>> {
             ),
         }
     }
+    for automation in config.automations.iter().filter(|automation| {
+        automation.enabled
+            && matches!(
+                automation.trigger,
+                rune_code::automation::AutomationTrigger::Interval
+                    | rune_code::automation::AutomationTrigger::Scheduled
+            )
+    }) {
+        match automation.validate() {
+            Ok(()) => match automation.is_approved(&workspace_root) {
+                Ok(true) => {
+                    if automation.os_schedule_is_installed(&workspace_root) {
+                        println!(
+                            "{}",
+                            format!(
+                                "Automation '{}' is managed by Windows Task Scheduler while Rune is closed.",
+                                automation.name
+                            )
+                            .cyan()
+                        );
+                        continue;
+                    }
+                    println!(
+                        "{}",
+                        format!(
+                            "Automation '{}' scheduled: {} (while Rune is running).",
+                            automation.name,
+                            automation.trigger_description()
+                        )
+                        .cyan()
+                    );
+                    let handle = automation.clone().spawn_scheduler(
+                            workspace_root.clone(),
+                            config.python_interpreter.clone(),
+                            config.python_args.clone(),
+                            config.automation_timeout_seconds,
+                            config.automation_max_output_bytes,
+                        );
+                    local_automation_schedulers.push((automation.name.clone(), handle));
+                }
+                Ok(false) => println!(
+                    "{}",
+                    format!(
+                        "Not scheduling '{}': script is not approved or changed. Review it, then use '/automation approve {}'.",
+                        automation.name, automation.name
+                    )
+                    .yellow()
+                ),
+                Err(error) => eprintln!(
+                    "{}",
+                    format!("Could not validate scheduled automation: {error}").red()
+                ),
+            },
+            Err(error) => eprintln!(
+                "{}",
+                format!("Invalid scheduled automation: {error}").red()
+            ),
+        }
+    }
     let mut auto_approve = false;
     let mut plan_mode = false;
     let mut pending_automation_context: Option<String> = None;
@@ -690,19 +809,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 Ok(false) => "not approved / script changed",
                                 Err(_) => "invalid or unavailable",
                             };
+                            let schedule_status = if matches!(
+                                automation.trigger,
+                                rune_code::automation::AutomationTrigger::Interval
+                                    | rune_code::automation::AutomationTrigger::Scheduled
+                            ) {
+                                if automation.os_schedule_is_installed(&workspace_root) {
+                                    "OS schedule installed"
+                                } else {
+                                    "in-process only"
+                                }
+                            } else {
+                                "no OS schedule"
+                            };
                             println!(
-                                "{}  [{}; {}; {}]",
+                                "{}  [{}; {}; {}; {}]",
                                 automation.name,
                                 if automation.enabled {
                                     "enabled"
                                 } else {
                                     "disabled"
                                 },
-                                match automation.trigger {
-                                    rune_code::automation::AutomationTrigger::Startup => "startup",
-                                    rune_code::automation::AutomationTrigger::Manual => "manual",
-                                },
-                                approval
+                                automation.trigger_description(),
+                                approval,
+                                schedule_status
                             );
                         }
                     }
@@ -749,6 +879,83 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 Err(error) => {
                                     eprintln!("{}", format!("Revocation failed: {error}").red())
                                 }
+                            }
+                        }
+                        ("install-schedule", false, Some(automation)) => match env::current_exe() {
+                            Ok(executable) => match automation
+                                .install_os_schedule(&workspace_root, &executable)
+                                .await
+                            {
+                                Ok(()) => {
+                                    if let Some(index) = local_automation_schedulers
+                                        .iter()
+                                        .position(|(name, _)| name == &automation.name)
+                                    {
+                                        local_automation_schedulers.remove(index).1.abort();
+                                    }
+                                    println!(
+                                                "{}",
+                                                format!(
+                                                    "Installed Windows Task Scheduler task for '{}'. It will run while Rune is closed when your Windows account is logged on.",
+                                                    automation.name
+                                                )
+                                                .green()
+                                            );
+                                }
+                                Err(error) => {
+                                    eprintln!(
+                                        "{}",
+                                        format!("Could not install OS schedule: {error}").red()
+                                    )
+                                }
+                            },
+                            Err(error) => eprintln!(
+                                "{}",
+                                format!("Could not locate Rune executable: {error}").red()
+                            ),
+                        },
+                        ("uninstall-schedule", false, Some(automation)) => {
+                            match automation.uninstall_os_schedule(&workspace_root).await {
+                                Ok(()) => {
+                                    println!(
+                                        "{}",
+                                        format!("Removed OS schedule for '{}'.", automation.name)
+                                            .yellow()
+                                    );
+                                    if automation.enabled
+                                            && matches!(
+                                                automation.trigger,
+                                                rune_code::automation::AutomationTrigger::Interval
+                                                    | rune_code::automation::AutomationTrigger::Scheduled
+                                            )
+                                        {
+                                            match automation.is_approved(&workspace_root) {
+                                                Ok(true) => {
+                                                    let handle = automation.clone().spawn_scheduler(
+                                                        workspace_root.clone(),
+                                                        config.python_interpreter.clone(),
+                                                        config.python_args.clone(),
+                                                        config.automation_timeout_seconds,
+                                                        config.automation_max_output_bytes,
+                                                    );
+                                                    local_automation_schedulers
+                                                        .push((automation.name.clone(), handle));
+                                                }
+                                                Ok(false) => {}
+                                                Err(error) => eprintln!(
+                                                    "{}",
+                                                    format!(
+                                                        "Removed OS schedule, but could not restart in-process scheduling: {error}"
+                                                    )
+                                                    .red()
+                                                ),
+                                            }
+                                        }
+                                }
+                                Err(error) => eprintln!(
+                                    "{}",
+                                    format!("Could not remove OS schedule: {error}").red()
+                                ),
                             }
                         }
                         ("run", false, Some(automation)) if automation.enabled => {
@@ -822,7 +1029,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             format!("No automation named '{name}' is configured.").red()
                         ),
                         _ => println!(
-                            "Usage: /automation run <name> [--context] | approve|revoke <name> | /automations"
+                            "Usage: /automation run <name> [--context] | approve|revoke <name> | install-schedule|uninstall-schedule <name> | /automations"
                         ),
                     }
                     continue;
@@ -1689,7 +1896,7 @@ coder_model = "gpt-5.6-luna"
                         "/automations".green()
                     );
                     println!(
-                        "  - {:<22} : Run, approve, or revoke an automation",
+                        "  - {:<22} : Run, approve, revoke, or schedule an automation",
                         "/automation".green()
                     );
                     continue;
