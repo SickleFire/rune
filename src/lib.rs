@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod api;
+pub mod automation;
 pub mod config;
 pub mod docker_tools;
 pub mod github_tools;

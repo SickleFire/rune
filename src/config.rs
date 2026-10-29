@@ -28,6 +28,16 @@ pub struct RuneConfig {
     pub mysql_url: Option<String>,
     #[serde(default)]
     pub excluded_read_paths: Vec<String>,
+    #[serde(default = "default_python_interpreter")]
+    pub python_interpreter: String,
+    #[serde(default)]
+    pub python_args: Vec<String>,
+    #[serde(default = "default_automation_timeout")]
+    pub automation_timeout_seconds: u64,
+    #[serde(default = "default_automation_max_output")]
+    pub automation_max_output_bytes: usize,
+    #[serde(default)]
+    pub automations: Vec<crate::automation::AutomationConfig>,
 }
 
 impl Default for RuneConfig {
@@ -60,6 +70,11 @@ impl Default for RuneConfig {
             coder_model: None,
             mysql_url: None,
             excluded_read_paths: Vec::new(),
+            python_interpreter: default_python_interpreter(),
+            python_args: Vec::new(),
+            automation_timeout_seconds: 30,
+            automation_max_output_bytes: 8192,
+            automations: Vec::new(),
         }
     }
 }
@@ -234,6 +249,22 @@ impl RuneConfig {
 
         config
     }
+}
+
+fn default_python_interpreter() -> String {
+    if cfg!(windows) {
+        "py".to_string()
+    } else {
+        "python3".to_string()
+    }
+}
+
+fn default_automation_timeout() -> u64 {
+    30
+}
+
+fn default_automation_max_output() -> usize {
+    8192
 }
 
 fn dirs_or_home() -> Option<PathBuf> {

@@ -23,10 +23,12 @@ Rune is an expert AI coding assistant integrated into a software development wor
 - **Smart Context**: Global awareness of repository architecture and file systems.
 - **Code Search Engine (cix)**: Fast symbol and pattern searching across the repository.
 - **Checkpointing & Version Control**: Git integration for safety checks, stashing, and rolling back mutations.
+- **Python Automations**: Run user-authored Python scripts at startup or on demand, with script approvals, execution timeouts, bounded output, and optional agent context handoff.
 
 ## Project Structure
 
 - `src/main.rs`: Entry point for the CLI and REPL loop, handling user input, history, and command dispatch.
+- `src/automation.rs`: Python automation configuration, approval, execution, output capture, and context handoff.
 - `src/lib.rs`: Core library initialization, agent orchestrator, and shared modules.
 - `src/api.rs`: API communication layer with LLM endpoints, request payload formatting, and response parsing.
 - `src/tools.rs`: Tool definitions, execution logic, workspace security validations, and utility functions.
@@ -126,6 +128,47 @@ rune --docker
 ```
 
 Or pass prompts directly via CLI arguments for quick tasks and automation scripts.
+
+### Automations
+
+Rune can run optional Python automations without making an LLM request. Add scripts as
+editable `.py` files and configure them in `rune.toml`:
+
+```toml
+python_interpreter = "python"
+automation_timeout_seconds = 30
+automation_max_output_bytes = 8192
+
+[[automations]]
+name = "morning-brief"
+script = ".rune/automations/morning_brief.py"
+enabled = true
+trigger = "startup" # or "manual"
+```
+
+Set `python_interpreter` to the Python executable on your system (for example, `python3`
+on macOS/Linux or `py` on Windows). Set `python_args = ["-3"]` if your Windows Python
+launcher requires an explicit version. Rune does not bundle Python or install packages;
+automations run with the configured interpreter and its installed dependencies.
+
+On first use, inspect the script and explicitly approve its current contents in Rune:
+
+```text
+/automation approve morning-brief
+```
+
+Changed scripts require approval again. `/automations` lists configured automations,
+`/automation run workspace-brief` runs an enabled automation on demand, and
+`/automation revoke workspace-brief` removes its approval. Startup automations run before
+the prompt only when enabled and approved. Successful non-empty output is available to
+the agent as untrusted data; asking the agent to interpret it uses LLM tokens, but running
+the script itself does not. Output is capped per stream and execution is stopped at the
+configured timeout. Failed runs are reported and their output is not added to agent context.
+
+Automations are not sandboxed: Python code has the permissions of the Rune process,
+including access to local files, credentials, and network resources. Approval is bound to
+the exact script contents, not a guarantee that the script is safe. Review scripts before
+approving them, and install any required dependencies yourself.
 
 ## Contributing
 

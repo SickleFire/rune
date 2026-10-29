@@ -57,6 +57,8 @@ impl Completer for RuneCodeHelper {
                 "/undo",
                 "/provider",
                 "/init",
+                "/automations",
+                "/automation",
             ];
 
             let mut pairs = Vec::new();
@@ -568,6 +570,77 @@ async fn main() -> Result<(), Box<dyn Error>> {
             ))
     }
 
+    let mut startup_automation_results = Vec::new();
+    for automation in config.automations.iter().filter(|automation| {
+        automation.enabled
+            && automation.trigger == rune_code::automation::AutomationTrigger::Startup
+    }) {
+        match automation.is_approved(&workspace_root) {
+            Ok(true) => {
+                println!(
+                    "{}",
+                    format!("Running startup automation '{}'...", automation.name).cyan()
+                );
+                match automation
+                    .run(
+                        &workspace_root,
+                        &config.python_interpreter,
+                        &config.python_args,
+                        config.automation_timeout_seconds,
+                        config.automation_max_output_bytes,
+                    )
+                    .await
+                {
+                    Ok(result) => {
+                        if result.success {
+                            println!(
+                                "{}",
+                                format!("Automation '{}' completed.", result.name).green()
+                            );
+                            if !result.output.is_empty() {
+                                println!("{}", result.output);
+                            }
+                            if result.truncated {
+                                println!(
+                                    "{}",
+                                    "Automation output was truncated by Rune.".yellow()
+                                );
+                            }
+                        } else {
+                            eprintln!(
+                                "{}",
+                                format!(
+                                    "Automation '{}' exited unsuccessfully:\n{}",
+                                    result.name, result.output
+                                )
+                                .red()
+                            );
+                        }
+                        startup_automation_results.push(result);
+                    }
+                    Err(error) => {
+                        eprintln!("{}", format!("Automation failed: {error}").red());
+                    }
+                }
+            }
+            Ok(false) => println!(
+                "{}",
+                format!(
+                    "Skipping startup automation '{}': script is not approved or changed. Review it, then use '/automation approve {}'.",
+                    automation.name, automation.name
+                )
+                .yellow()
+            ),
+            Err(error) => eprintln!(
+                "{}",
+                format!("Could not validate startup automation: {error}").red()
+            ),
+        }
+    }
+    if let Some(context) = rune_code::automation::automation_context(&startup_automation_results) {
+        orchestrator.inject_context_on_all(context);
+    }
+
     let mut auto_approve = false;
     let mut plan_mode = false;
     let mut rl = Editor::new()?;
@@ -609,6 +682,139 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let prompt = line.trim();
 
                 if prompt.is_empty() {
+                    continue;
+                }
+
+                if prompt.eq_ignore_ascii_case("/automations") {
+                    if config.automations.is_empty() {
+                        println!("{}", "No automations configured in rune.toml.".yellow());
+                    } else {
+                        for automation in &config.automations {
+                            let approval = match automation.is_approved(&workspace_root) {
+                                Ok(true) => "approved",
+                                Ok(false) => "not approved / script changed",
+                                Err(_) => "invalid or unavailable",
+                            };
+                            println!(
+                                "{}  [{}; {}; {}]",
+                                automation.name,
+                                if automation.enabled {
+                                    "enabled"
+                                } else {
+                                    "disabled"
+                                },
+                                match automation.trigger {
+                                    rune_code::automation::AutomationTrigger::Startup => "startup",
+                                    rune_code::automation::AutomationTrigger::Manual => "manual",
+                                },
+                                approval
+                            );
+                        }
+                    }
+                    continue;
+                }
+
+                if prompt.eq_ignore_ascii_case("/automation") || prompt.starts_with("/automation ")
+                {
+                    let rest = prompt.strip_prefix("/automation").unwrap_or("").trim();
+                    let mut parts = rest.split_whitespace();
+                    let action = parts.next().unwrap_or("");
+                    let name = parts.next().unwrap_or("");
+                    let automation = config
+                        .automations
+                        .iter()
+                        .find(|automation| automation.name == name);
+                    match (action, name.is_empty(), automation) {
+                        ("approve", false, Some(automation)) => {
+                            println!(
+                                "{}",
+                                format!(
+                                    "Review {} before approval. Approved scripts run with your user permissions.",
+                                    automation.script
+                                )
+                                .yellow()
+                            );
+                            match automation.approve(&workspace_root) {
+                                Ok(()) => println!(
+                                    "{}",
+                                    format!("Approved automation '{}'.", automation.name).green()
+                                ),
+                                Err(error) => {
+                                    eprintln!("{}", format!("Approval failed: {error}").red())
+                                }
+                            }
+                        }
+                        ("revoke", false, Some(automation)) => {
+                            match automation.revoke(&workspace_root) {
+                                Ok(()) => println!(
+                                    "{}",
+                                    format!("Revoked automation '{}'.", automation.name).yellow()
+                                ),
+                                Err(error) => {
+                                    eprintln!("{}", format!("Revocation failed: {error}").red())
+                                }
+                            }
+                        }
+                        ("run", false, Some(automation)) if automation.enabled => {
+                            match automation
+                                .run(
+                                    &workspace_root,
+                                    &config.python_interpreter,
+                                    &config.python_args,
+                                    config.automation_timeout_seconds,
+                                    config.automation_max_output_bytes,
+                                )
+                                .await
+                            {
+                                Ok(result) => {
+                                    if result.success {
+                                        println!(
+                                            "{}",
+                                            format!("Automation '{}' completed.", result.name)
+                                                .green()
+                                        );
+                                        if !result.output.is_empty() {
+                                            println!("{}", result.output);
+                                        }
+                                        if result.truncated {
+                                            println!(
+                                                "{}",
+                                                "Automation output was truncated by Rune.".yellow()
+                                            );
+                                        }
+                                        if let Some(context) =
+                                            rune_code::automation::automation_context(&[result])
+                                        {
+                                            orchestrator.inject_context_on_all(context);
+                                        }
+                                    } else {
+                                        eprintln!(
+                                            "{}",
+                                            format!(
+                                                "Automation '{}' exited unsuccessfully:\n{}",
+                                                result.name, result.output
+                                            )
+                                            .red()
+                                        );
+                                    }
+                                }
+                                Err(error) => {
+                                    eprintln!("{}", format!("Automation failed: {error}").red())
+                                }
+                            }
+                        }
+                        ("run", false, Some(_)) => println!(
+                            "{}",
+                            format!("Automation '{name}' is disabled in rune.toml.").yellow()
+                        ),
+                        (_, _, None) if !name.is_empty() => println!(
+                            "{}",
+                            format!("No automation named '{name}' is configured.").red()
+                        ),
+                        _ => println!(
+                            "Usage: /automation <run|approve|revoke> <name>  |  /automations"
+                        ),
+                    }
                     continue;
                 }
 
@@ -1468,6 +1674,14 @@ coder_model = "gpt-5.6-luna"
                         "/clear or /reset".green()
                     );
                     println!("  - {:<22} : Exit the application", "exit or quit".green());
+                    println!(
+                        "  - {:<22} : List configured automations",
+                        "/automations".green()
+                    );
+                    println!(
+                        "  - {:<22} : Run, approve, or revoke an automation",
+                        "/automation".green()
+                    );
                     continue;
                 }
 

@@ -158,6 +158,12 @@ impl MultiAgentOrchestrator {
         self
     }
 
+    pub fn inject_context_on_all(&mut self, context: String) {
+        for agent in &mut self.agents {
+            agent.inject_custom_system_context(context.clone());
+        }
+    }
+
     pub fn set_model_all(&mut self, model: String) {
         for (i, agent) in self.agents.iter_mut().enumerate() {
             agent.model = model.clone();
